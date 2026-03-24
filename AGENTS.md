@@ -103,43 +103,14 @@ These are configured in the workspace and `clippy.toml`.
 
 ## Code Style Guidelines
 
-Formatting:
-- Always run `cargo fmt --all` after substantive Rust edits.
-- Follow `rustfmt.toml`; do not hand-format against repository rules.
-- Keep expressions and control flow readable; do not fight rustfmt.
-
-Imports:
-- Keep imports explicit and minimal.
-- Prefer grouped imports when they improve clarity, for example `use railgun_types::{Address, ChainId, TxHash};`.
+- Follow `rustfmt.toml`, `Cargo.toml` workspace lints, `clippy.toml`, and `deny.toml`; prefer enforcing mechanical rules there instead of restating them in docs.
+- Formatting, basic naming, missing `# Errors` docs, `unwrap`/`expect` avoidance, and unused-import hygiene are enforced by tooling.
 - In reusable/core code, prefer `core` over `std` where practical.
-- Do not leave unused imports behind.
-- Avoid wildcard imports unless there is a strong local reason.
-
-Types and APIs:
 - Public APIs should use domain types, not loose strings or unvalidated bytes.
 - Add dedicated types for protocol concepts when semantic distinction matters.
-- Prefer fallible constructors for validated values.
-- Use `#[must_use]` on constructors, getters, and helpers where ignoring the value is likely a bug.
-- Avoid exposing vendor-specific types from core crates.
-- Do not shape core APIs around one downstream integration library.
-- Values that should usually be typed include addresses, chain IDs, transaction hashes, commitments, nullifiers, Merkle roots, and proof artifacts.
-
-Naming and errors:
-- `snake_case` for functions, modules, locals, and fields
-- `PascalCase` for structs, enums, traits, and type aliases
-- `SCREAMING_SNAKE_CASE` for constants
-- Trait names should describe capabilities, not vendors
-- Error types should have clear domain names such as `ParseDomainError` or `RailgunError`
-- Prefer typed error enums or structs over stringly failures
-- Implement `Display` and `std::error::Error` for public error types
-- Document public `Result`-returning items with a `# Errors` section
-- Validate inputs at the boundary where they enter the domain model
-- Avoid `unwrap` and `expect` in library code unless the invariant is strong and obvious
-
-Documentation:
-- Public items should have rustdoc comments.
-- Explain invariants, validation rules, and the meaning of typed values.
-- Keep comments focused on why or invariants, not on obvious syntax.
+- Prefer fallible constructors for validated values and `#[must_use]` where ignoring results is likely a bug.
+- Avoid exposing vendor-specific types from core crates or shaping core APIs around one downstream library.
+- Public docs should explain invariants, validation rules, and the meaning of typed values.
 
 ## Dependency, WASM, And CLI Rules
 
