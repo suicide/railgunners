@@ -28,16 +28,10 @@ The exact crate set can evolve, but the initial workspace should follow a shape 
 ├── crates/
 │   ├── railgun-types/
 │   ├── railgun-core/
-│   ├── railgun-wallet/
-│   ├── railgun-chain/
-│   ├── railgun-storage/
-│   ├── railgun-broadcaster/
-│   ├── railgun-poi/
 │   ├── railgun-wasm/
 │   └── railgun-cli/
 ├── adapters/
-│   ├── alloy/
-│   └── indexeddb/
+│   └── optional integrations added when needed
 └── docs and top-level project files
 ```
 
@@ -81,26 +75,17 @@ Examples include:
 
 ### Domain-Specific Crates
 
-Crates such as `railgun-wallet`, `railgun-chain`, `railgun-storage`, `railgun-broadcaster`, and `railgun-poi` should each own one clear area of responsibility.
+Additional domain-specific crates should be introduced only when real feature work justifies the boundary.
 
-Examples:
+Likely future candidates include wallet, chain, storage, broadcaster, and Proof of Innocence crates, but they should not exist before they have a clear reason to exist.
 
-- `railgun-wallet` for wallet-facing domain workflows and state transitions
-- `railgun-chain` for chain interaction traits and chain-facing models
-- `railgun-storage` for storage traits and storage data modeling
-- `railgun-broadcaster` for broadcaster-facing models and client traits
-- `railgun-poi` for Proof of Innocence models and capability traits
-
-The exact split can change, but each crate must have a narrow purpose.
+The exact split can evolve, but each crate must have a narrow purpose and should be added because it improves ownership boundaries rather than because it seems theoretically useful.
 
 ### Adapter Crates
 
 Adapters implement concrete integrations without polluting core APIs.
 
-Examples:
-
-- `adapters/alloy` for EVM chain access using `alloy`
-- `adapters/indexeddb` for browser persistence using IndexedDB-based tooling
+Examples of future adapters include EVM integrations built on `alloy` and browser storage integrations built on IndexedDB-oriented libraries.
 
 Adapter crates may include convenience helpers, but those helpers must not define the required shape of core APIs.
 

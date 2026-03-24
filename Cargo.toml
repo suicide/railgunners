@@ -1,0 +1,29 @@
+[workspace]
+members = [
+    "crates/railgun-types",
+    "crates/railgun-core",
+    "crates/railgun-wasm",
+    "crates/railgun-cli",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+authors = ["RAILGUN contributors"]
+repository = "https://github.com/railgun-community/railgun-rs"
+rust-version = "1.85"
+
+[workspace.dependencies]
+railgun-types = { path = "crates/railgun-types" }
+railgun-core = { path = "crates/railgun-core" }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
