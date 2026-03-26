@@ -2,6 +2,7 @@
 
 pub mod bip39;
 pub mod hd;
+pub mod keys;
 
 use railgun_types::{Address, ChainId, TxHash};
 
@@ -9,6 +10,11 @@ pub use bip39::{Bip39Error, Bip39Mnemonic};
 pub use hd::{
     DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,
     derive_node_from_str, derive_spending_node, derive_viewing_node, spending_path, viewing_path,
+};
+pub use keys::{
+    derive_spending_key_pair, derive_spending_public_key, derive_spending_public_key_from_bytes,
+    derive_viewing_key_pair, derive_viewing_public_key, derive_viewing_public_key_from_bytes,
+    spending_private_key_from_node, viewing_private_key_from_node,
 };
 
 /// Result alias used across foundational crates.

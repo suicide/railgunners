@@ -11,7 +11,10 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+babyjubjub-rs = "0.0.11"
 bip39 = "2.2.2"
+ed25519-dalek = "3.0.0-pre.6"
 hmac = "0.12.1"
+num-bigint = "0.4.6"
 railgun-types.workspace = true
 sha2 = "0.10.9"

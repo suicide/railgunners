@@ -19,6 +19,8 @@ const VIEWING_PATH_PREFIX: [u32; 4] = [420, 1984, 0, 0];
 pub enum KeyDerivationError {
     /// The seed is not the canonical 64-byte BIP-39 seed.
     InvalidSeedLength(usize),
+    /// The private key is not exactly 32 bytes long.
+    InvalidPrivateKeyLength(usize),
     /// The derivation path is malformed.
     InvalidPath,
     /// The derivation path must begin with the root marker.
@@ -36,6 +38,9 @@ impl fmt::Display for KeyDerivationError {
         match self {
             Self::InvalidSeedLength(length) => {
                 write!(formatter, "invalid BIP-39 seed length: expected 64 bytes, got {length}")
+            }
+            Self::InvalidPrivateKeyLength(length) => {
+                write!(formatter, "invalid private key length: expected 32 bytes, got {length}")
             }
             Self::InvalidPath => formatter.write_str("invalid hardened derivation path"),
             Self::InvalidPathRoot => formatter.write_str("derivation path must start with 'm'"),
