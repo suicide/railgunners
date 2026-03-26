@@ -1,11 +1,14 @@
 //! Railgun spending and viewing keypair derivation.
 
+use ark_bn254::Fr;
+use ark_ff::{BigInteger, PrimeField};
 use babyjubjub_rs::PrivateKey as BabyJubJubPrivateKey;
 use ed25519_dalek::SigningKey;
+use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
 use railgun_types::{
-    SpendingKeyPair, SpendingPrivateKey, SpendingPublicKey, ViewingKeyPair, ViewingPrivateKey,
-    ViewingPublicKey,
+    NullifyingKey, SpendingKeyPair, SpendingPrivateKey, SpendingPublicKey, ViewingKeyPair,
+    ViewingPrivateKey, ViewingPublicKey,
 };
 
 use crate::hd::{KeyDerivationError, WalletNode};
@@ -103,10 +106,46 @@ pub fn derive_viewing_key_pair(private_key: ViewingPrivateKey) -> ViewingKeyPair
     ViewingKeyPair::new(private_key, public_key)
 }
 
+/// Derives a nullifying key from a typed 32-byte viewing private key.
+///
+/// The viewing private key bytes are interpreted as a big-endian integer before
+/// hashing with Poseidon over the BN254 scalar field.
+///
+/// # Errors
+///
+/// Returns an error if Poseidon hashing fails unexpectedly.
+pub fn derive_nullifying_key(
+    private_key: &ViewingPrivateKey,
+) -> Result<NullifyingKey, KeyDerivationError> {
+    let input = Fr::from_be_bytes_mod_order(private_key.as_bytes());
+    let mut poseidon =
+        Poseidon::<Fr>::new_circom(1).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    let hash = poseidon.hash(&[input]).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    let bytes = hash.into_bigint().to_bytes_be();
+
+    Ok(NullifyingKey::new(BigUint::from_bytes_be(&bytes)))
+}
+
+/// Derives a nullifying key from raw viewing-private-key bytes.
+///
+/// # Errors
+///
+/// Returns an error if `private_key` is not exactly 32 bytes long or if
+/// Poseidon hashing fails unexpectedly.
+pub fn derive_nullifying_key_from_bytes(
+    private_key: &[u8],
+) -> Result<NullifyingKey, KeyDerivationError> {
+    let private_key: [u8; ViewingPrivateKey::LENGTH] = private_key
+        .try_into()
+        .map_err(|_| KeyDerivationError::InvalidPrivateKeyLength(private_key.len()))?;
+    derive_nullifying_key(&ViewingPrivateKey::new(private_key))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        derive_spending_key_pair, derive_spending_public_key_from_bytes, derive_viewing_key_pair,
+        derive_nullifying_key, derive_nullifying_key_from_bytes, derive_spending_key_pair,
+        derive_spending_public_key_from_bytes, derive_viewing_key_pair,
         derive_viewing_public_key_from_bytes, spending_private_key_from_node,
         viewing_private_key_from_node,
     };
@@ -185,6 +224,40 @@ mod tests {
             panic!("invalid viewing private key length should fail");
         };
         assert_eq!(error, KeyDerivationError::InvalidPrivateKeyLength(33));
+    }
+
+    #[test]
+    fn derives_nullifying_key_from_issue_vector_one() {
+        let private_key =
+            hex_array::<32>("67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef");
+        let nullifying_key = derive_nullifying_key(&ViewingPrivateKey::new(private_key))
+            .unwrap_or_else(|_| panic!("nullifying key derivation should succeed"));
+
+        assert_eq!(
+            nullifying_key.value().to_string(),
+            "12835268173099116305231859677177501123414588269721547120001227054861606950622"
+        );
+    }
+
+    #[test]
+    fn derives_nullifying_key_from_issue_vector_two() {
+        let private_key =
+            hex_array::<32>("3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e");
+        let nullifying_key = derive_nullifying_key(&ViewingPrivateKey::new(private_key))
+            .unwrap_or_else(|_| panic!("nullifying key derivation should succeed"));
+
+        assert_eq!(
+            nullifying_key.value().to_string(),
+            "12433581129726328896745774227574786958991377531034322249715552469191536529193"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_nullifying_private_key_length() {
+        let Err(error) = derive_nullifying_key_from_bytes(&[7_u8; 31]) else {
+            panic!("invalid nullifying private key length should fail");
+        };
+        assert_eq!(error, KeyDerivationError::InvalidPrivateKeyLength(31));
     }
 
     #[test]

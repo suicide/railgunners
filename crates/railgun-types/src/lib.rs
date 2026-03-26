@@ -206,6 +206,24 @@ impl ViewingKeyPair {
     }
 }
 
+/// Typed Railgun nullifying key derived from a viewing private key.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NullifyingKey(BigUint);
+
+impl NullifyingKey {
+    /// Creates a nullifying key from a field-element integer value.
+    #[must_use]
+    pub const fn new(value: BigUint) -> Self {
+        Self(value)
+    }
+
+    /// Returns the underlying field-element integer value.
+    #[must_use]
+    pub const fn value(&self) -> &BigUint {
+        &self.0
+    }
+}
+
 /// Typed EVM address.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Address([u8; 20]);
