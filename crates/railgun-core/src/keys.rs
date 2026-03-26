@@ -2,8 +2,10 @@
 
 use ark_bn254::Fr;
 use ark_ff::{BigInteger, PrimeField};
+use babyjubjub_rs::Fr as BabyJubJubField;
 use babyjubjub_rs::PrivateKey as BabyJubJubPrivateKey;
 use ed25519_dalek::SigningKey;
+use ff::{PrimeField as _, PrimeFieldRepr as _};
 use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
 use railgun_types::{
@@ -13,13 +15,19 @@ use railgun_types::{
 
 use crate::hd::{KeyDerivationError, WalletNode};
 
-fn parse_coordinate(value: &impl ToString) -> Result<BigUint, KeyDerivationError> {
-    let value = value.to_string();
-    let Some(hex) = value.strip_prefix("Fr(0x").and_then(|value| value.strip_suffix(')')) else {
-        return Err(KeyDerivationError::DerivationFailure);
-    };
-
-    BigUint::parse_bytes(hex.as_bytes(), 16).ok_or(KeyDerivationError::DerivationFailure)
+// This module currently touches two different field-element types that both use
+// the conventional `Fr` name:
+// - `ark_bn254::Fr` is the BN254 scalar field used by `light-poseidon`.
+// - `babyjubjub_rs::Fr` is the BabyJubJub field type used for public-key
+//   coordinates returned by `babyjubjub-rs`.
+//
+// They come from different libraries and trait ecosystems, so we alias the
+// BabyJubJub one and import both trait sets explicitly.
+fn parse_coordinate(value: &BabyJubJubField) -> Result<BigUint, KeyDerivationError> {
+    let repr = value.into_repr();
+    let mut bytes = Vec::with_capacity(core::mem::size_of_val(repr.as_ref()));
+    repr.write_be(&mut bytes).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    Ok(BigUint::from_bytes_be(&bytes))
 }
 
 /// Converts a wallet node into a typed spending private key.
