@@ -1,10 +1,15 @@
 //! Shared protocol traits and errors for the RAILGUN workspace.
 
 pub mod bip39;
+pub mod hd;
 
 use railgun_types::{Address, ChainId, TxHash};
 
 pub use bip39::{Bip39Error, Bip39Mnemonic};
+pub use hd::{
+    DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,
+    derive_node_from_str, derive_spending_node, derive_viewing_node, spending_path, viewing_path,
+};
 
 /// Result alias used across foundational crates.
 pub type Result<T, E = RailgunError> = core::result::Result<T, E>;

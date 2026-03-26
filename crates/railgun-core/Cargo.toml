@@ -12,4 +12,6 @@ workspace = true
 
 [dependencies]
 bip39 = "2.2.2"
+hmac = "0.12.1"
 railgun-types.workspace = true
+sha2 = "0.10.9"
