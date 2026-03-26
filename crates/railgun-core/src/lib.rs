@@ -3,6 +3,7 @@
 pub mod bip39;
 pub mod hd;
 pub mod keys;
+pub mod shareable_viewing_key;
 
 use railgun_types::{Address, ChainId, TxHash};
 
@@ -16,6 +17,10 @@ pub use keys::{
     derive_spending_key_pair, derive_spending_public_key, derive_spending_public_key_from_bytes,
     derive_viewing_key_pair, derive_viewing_public_key, derive_viewing_public_key_from_bytes,
     spending_private_key_from_node, viewing_private_key_from_node,
+};
+pub use shareable_viewing_key::{
+    ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
+    pack_spending_public_key, unpack_spending_public_key,
 };
 
 /// Result alias used across foundational crates.

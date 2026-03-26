@@ -21,4 +21,7 @@ hmac = "0.12.1"
 light-poseidon = "0.4.0"
 num-bigint = "0.4.6"
 railgun-types.workspace = true
+rmp-serde = "1.3.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_bytes = "0.11.19"
 sha2 = "0.10.9"

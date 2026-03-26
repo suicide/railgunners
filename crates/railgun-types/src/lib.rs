@@ -242,6 +242,69 @@ impl MasterPublicKey {
     }
 }
 
+/// Typed 32-byte packed `BabyJubJub` spending public key.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct PackedSpendingPublicKey([u8; 32]);
+
+impl PackedSpendingPublicKey {
+    /// Length of a packed spending public key in bytes.
+    pub const LENGTH: usize = 32;
+
+    /// Creates a packed spending public key from raw bytes.
+    #[must_use]
+    pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
+        Self(bytes)
+    }
+
+    /// Creates a packed spending public key from a byte slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `bytes` is not exactly 32 bytes long.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, ParseDomainError> {
+        let array: [u8; Self::LENGTH] = bytes.try_into().map_err(|_| {
+            ParseDomainError::new("packed spending public key must be exactly 32 bytes")
+        })?;
+        Ok(Self::new(array))
+    }
+
+    /// Returns the raw packed public-key bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+}
+
+/// View-only wallet import/export payload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ShareableViewingKeyData {
+    viewing_private_key: ViewingPrivateKey,
+    packed_spending_public_key: PackedSpendingPublicKey,
+}
+
+impl ShareableViewingKeyData {
+    /// Creates a shareable viewing key payload from explicit components.
+    #[must_use]
+    pub const fn new(
+        viewing_private_key: ViewingPrivateKey,
+        packed_spending_public_key: PackedSpendingPublicKey,
+    ) -> Self {
+        Self { viewing_private_key, packed_spending_public_key }
+    }
+
+    /// Returns the viewing private key.
+    #[must_use]
+    pub const fn viewing_private_key(&self) -> &ViewingPrivateKey {
+        &self.viewing_private_key
+    }
+
+    /// Returns the packed spending public key.
+    #[must_use]
+    pub const fn packed_spending_public_key(&self) -> &PackedSpendingPublicKey {
+        &self.packed_spending_public_key
+    }
+}
+
 /// Typed EVM address.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Address([u8; 20]);
