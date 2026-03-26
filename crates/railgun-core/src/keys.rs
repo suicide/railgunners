@@ -9,8 +9,8 @@ use ff::{PrimeField as _, PrimeFieldRepr as _};
 use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
 use railgun_types::{
-    NullifyingKey, SpendingKeyPair, SpendingPrivateKey, SpendingPublicKey, ViewingKeyPair,
-    ViewingPrivateKey, ViewingPublicKey,
+    MasterPublicKey, NullifyingKey, SpendingKeyPair, SpendingPrivateKey, SpendingPublicKey,
+    ViewingKeyPair, ViewingPrivateKey, ViewingPublicKey,
 };
 
 use crate::hd::{KeyDerivationError, WalletNode};
@@ -28,6 +28,14 @@ fn parse_coordinate(value: &BabyJubJubField) -> Result<BigUint, KeyDerivationErr
     let mut bytes = Vec::with_capacity(core::mem::size_of_val(repr.as_ref()));
     repr.write_be(&mut bytes).map_err(|_| KeyDerivationError::DerivationFailure)?;
     Ok(BigUint::from_bytes_be(&bytes))
+}
+
+fn biguint_to_bn254_field(value: &BigUint) -> Result<Fr, KeyDerivationError> {
+    let bytes = value.to_bytes_be();
+    let field = Fr::from_be_bytes_mod_order(&bytes);
+    let roundtrip = BigUint::from_bytes_be(&field.into_bigint().to_bytes_be());
+
+    if roundtrip == *value { Ok(field) } else { Err(KeyDerivationError::DerivationFailure) }
 }
 
 /// Converts a wallet node into a typed spending private key.
@@ -149,16 +157,43 @@ pub fn derive_nullifying_key_from_bytes(
     derive_nullifying_key(&ViewingPrivateKey::new(private_key))
 }
 
+/// Derives a master public key from a spending public key and nullifying key.
+///
+/// Poseidon input ordering is exactly `[spending_public_key.x,
+/// spending_public_key.y, nullifying_key]` over the BN254 scalar field.
+///
+/// # Errors
+///
+/// Returns an error if an input integer is not a valid BN254 field element or
+/// if Poseidon hashing fails unexpectedly.
+pub fn derive_master_public_key(
+    spending_public_key: &SpendingPublicKey,
+    nullifying_key: &NullifyingKey,
+) -> Result<MasterPublicKey, KeyDerivationError> {
+    let inputs = [
+        biguint_to_bn254_field(spending_public_key.x())?,
+        biguint_to_bn254_field(spending_public_key.y())?,
+        biguint_to_bn254_field(nullifying_key.value())?,
+    ];
+    let mut poseidon =
+        Poseidon::<Fr>::new_circom(3).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    let hash = poseidon.hash(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
+
+    Ok(MasterPublicKey::new(BigUint::from_bytes_be(&hash.into_bigint().to_bytes_be())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        derive_nullifying_key, derive_nullifying_key_from_bytes, derive_spending_key_pair,
+        derive_master_public_key, derive_nullifying_key, derive_nullifying_key_from_bytes,
+        derive_spending_key_pair, derive_spending_public_key,
         derive_spending_public_key_from_bytes, derive_viewing_key_pair,
         derive_viewing_public_key_from_bytes, spending_private_key_from_node,
         viewing_private_key_from_node,
     };
     use crate::hd::{KeyDerivationError, derive_node_from_str};
-    use railgun_types::{SpendingPrivateKey, ViewingPrivateKey};
+    use num_bigint::BigUint;
+    use railgun_types::{NullifyingKey, SpendingPrivateKey, SpendingPublicKey, ViewingPrivateKey};
 
     #[test]
     fn derives_spending_keypair_from_issue_vector_one() {
@@ -269,6 +304,78 @@ mod tests {
     }
 
     #[test]
+    fn derives_master_public_key_from_issue_vector_one() {
+        let spending_public_key = SpendingPublicKey::new(
+            parse_decimal(
+                "15684838006997671713939066069845237677934334329285343229142447933587909549584",
+            ),
+            parse_decimal(
+                "11878614856120328179849762231924033298788609151532558727282528569229552954628",
+            ),
+        );
+        let nullifying_key = NullifyingKey::new(parse_decimal(
+            "8368299126798249740586535953124199418524409103803955764525436743456763691384",
+        ));
+        let master_public_key = derive_master_public_key(&spending_public_key, &nullifying_key)
+            .unwrap_or_else(|_| panic!("master public key derivation should succeed"));
+
+        assert_eq!(
+            master_public_key.value().to_string(),
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087"
+        );
+    }
+
+    #[test]
+    fn master_public_key_depends_on_input_ordering() {
+        let spending_public_key = SpendingPublicKey::new(
+            parse_decimal(
+                "15684838006997671713939066069845237677934334329285343229142447933587909549584",
+            ),
+            parse_decimal(
+                "11878614856120328179849762231924033298788609151532558727282528569229552954628",
+            ),
+        );
+        let canonical_nullifying_key = NullifyingKey::new(parse_decimal(
+            "8368299126798249740586535953124199418524409103803955764525436743456763691384",
+        ));
+        let canonical = derive_master_public_key(&spending_public_key, &canonical_nullifying_key)
+            .unwrap_or_else(|_| panic!("canonical master public key derivation should succeed"));
+
+        let reordered_spending_public_key = SpendingPublicKey::new(
+            spending_public_key.y().clone(),
+            spending_public_key.x().clone(),
+        );
+        let reordered =
+            derive_master_public_key(&reordered_spending_public_key, &canonical_nullifying_key)
+                .unwrap_or_else(|_| {
+                    panic!("reordered master public key derivation should succeed")
+                });
+
+        assert_ne!(canonical, reordered);
+    }
+
+    #[test]
+    fn derives_master_public_key_from_composed_key_material() {
+        let spending_private_key = SpendingPrivateKey::new(hex_array::<32>(
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        ));
+        let viewing_private_key = ViewingPrivateKey::new(hex_array::<32>(
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        ));
+        let spending_public_key = derive_spending_public_key(&spending_private_key)
+            .unwrap_or_else(|_| panic!("spending public key derivation should succeed"));
+        let nullifying_key = derive_nullifying_key(&viewing_private_key)
+            .unwrap_or_else(|_| panic!("nullifying key derivation should succeed"));
+        let master_public_key = derive_master_public_key(&spending_public_key, &nullifying_key)
+            .unwrap_or_else(|_| panic!("master public key derivation should succeed"));
+
+        assert_eq!(
+            master_public_key.value().to_string(),
+            "15607618471549356314064749634364841401625982784343012680230632021308514635691"
+        );
+    }
+
+    #[test]
     fn derives_keypairs_from_issue_child_node() {
         let seed = hex_decode(
             "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4",
@@ -323,5 +430,10 @@ mod tests {
             assert!(result.is_ok(), "writing to a string should succeed");
         }
         encoded
+    }
+
+    fn parse_decimal(value: &str) -> BigUint {
+        BigUint::parse_bytes(value.as_bytes(), 10)
+            .unwrap_or_else(|| panic!("test decimal should be valid"))
     }
 }

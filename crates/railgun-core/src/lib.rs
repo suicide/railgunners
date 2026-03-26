@@ -12,9 +12,9 @@ pub use hd::{
     derive_node_from_str, derive_spending_node, derive_viewing_node, spending_path, viewing_path,
 };
 pub use keys::{
-    derive_nullifying_key, derive_nullifying_key_from_bytes, derive_spending_key_pair,
-    derive_spending_public_key, derive_spending_public_key_from_bytes, derive_viewing_key_pair,
-    derive_viewing_public_key, derive_viewing_public_key_from_bytes,
+    derive_master_public_key, derive_nullifying_key, derive_nullifying_key_from_bytes,
+    derive_spending_key_pair, derive_spending_public_key, derive_spending_public_key_from_bytes,
+    derive_viewing_key_pair, derive_viewing_public_key, derive_viewing_public_key_from_bytes,
     spending_private_key_from_node, viewing_private_key_from_node,
 };
 
