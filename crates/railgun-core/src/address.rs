@@ -220,6 +220,12 @@ mod tests {
     use num_bigint::BigUint;
     use railgun_types::{ChainScope, ChainType, MasterPublicKey, RailgunChain, ViewingPublicKey};
 
+    use crate::{
+        Bip39Mnemonic, derive_master_public_key, derive_nullifying_key, derive_spending_node,
+        derive_spending_public_key, derive_viewing_node, derive_viewing_public_key,
+        spending_private_key_from_node, viewing_private_key_from_node,
+    };
+
     use super::{
         ADDRESS_MAX_LENGTH, ADDRESS_PAYLOAD_LENGTH, ADDRESS_VERSION_V1, AddressDecodingError,
         AddressEncodingError, decode_railgun_address, encode_railgun_address,
@@ -390,6 +396,57 @@ mod tests {
         assert_eq!(decoded.master_public_key(), &master_public_key);
         assert_eq!(decoded.chain_scope(), ChainScope::AllChains);
         assert_eq!(decoded.viewing_public_key(), &viewing_public_key);
+    }
+
+    #[test]
+    fn derives_encodes_and_decodes_address_from_mnemonic() {
+        let mnemonic = Bip39Mnemonic::parse(
+            "copper seek theme opera young wage kite lesson valley soccer vague often",
+        )
+        .unwrap_or_else(|_| panic!("mnemonic should parse"));
+        let seed = mnemonic.seed(None);
+
+        let spending_node = derive_spending_node(&seed, 0)
+            .unwrap_or_else(|_| panic!("spending node should derive"));
+        let viewing_node =
+            derive_viewing_node(&seed, 0).unwrap_or_else(|_| panic!("viewing node should derive"));
+
+        let spending_private_key = spending_private_key_from_node(&spending_node);
+        let viewing_private_key = viewing_private_key_from_node(&viewing_node);
+        let spending_public_key = derive_spending_public_key(&spending_private_key)
+            .unwrap_or_else(|_| panic!("spending public key should derive"));
+        let viewing_public_key = derive_viewing_public_key(&viewing_private_key);
+        let nullifying_key = derive_nullifying_key(&viewing_private_key)
+            .unwrap_or_else(|_| panic!("nullifying key should derive"));
+        let master_public_key = derive_master_public_key(&spending_public_key, &nullifying_key)
+            .unwrap_or_else(|_| panic!("master public key should derive"));
+
+        let address = encode_railgun_address(
+            ADDRESS_VERSION_V1,
+            &master_public_key,
+            ChainScope::AllChains,
+            &viewing_public_key,
+        )
+        .unwrap_or_else(|_| panic!("address should encode"));
+
+        assert_eq!(
+            address.as_str(),
+            "0zk1qysh94ex20f5cyghr5qxcx9vz3vac0e4z9sdwje24y4w8mwtdual9rv7j6fe3z53l7cxw6zzd79a6zcpn7fny3wm7uut4xnvrj6u9pr0wt98ut6snx2vwl43v8t"
+        );
+
+        let decoded = decode_railgun_address(address.as_str())
+            .unwrap_or_else(|_| panic!("address should decode"));
+
+        assert_eq!(decoded.version(), ADDRESS_VERSION_V1);
+        assert_eq!(decoded.master_public_key(), &master_public_key);
+        assert_eq!(decoded.chain_scope(), ChainScope::AllChains);
+        assert_eq!(decoded.viewing_public_key(), &viewing_public_key);
+
+        // Later we may also assert the related Railgun wallet ID once that
+        // derivation is modeled explicitly in the SDK:
+        // 267143cc060d24ea2b6dee4a8ff9f1ce2e4a403f12e5c43e43def26f7e80755b
+        // Later we may also assert the related EVM public address:
+        // 0x5eD67cC280Db52334512E123CcaB62398125bf21
     }
 
     #[test]
