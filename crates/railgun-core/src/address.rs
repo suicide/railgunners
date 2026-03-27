@@ -6,17 +6,16 @@ use bech32::primitives::decode::CheckedHrpstring;
 use bech32::{Bech32m, Hrp};
 use num_bigint::BigUint;
 use railgun_types::{
-    ChainScope, MasterPublicKey, NetworkId, RailgunAddress, RailgunAddressData, RailgunChain,
-    ViewingPublicKey,
+    ChainScope, MasterPublicKey, NetworkId, RailgunAddress, RailgunAddressData, ViewingPublicKey,
 };
+
+use crate::network_id::{NetworkIdError, decode_network_id, encode_network_id};
 
 const ADDRESS_VERSION_V1: u8 = 1;
 const ADDRESS_HRP: &str = "0zk";
 const ADDRESS_MAX_LENGTH: usize = 127;
 const MASTER_PUBLIC_KEY_LENGTH: usize = 32;
 const VIEWING_PUBLIC_KEY_LENGTH: usize = 32;
-const NETWORK_ID_XOR_MASK: [u8; NetworkId::LENGTH] = *b"railgun\x00";
-const ALL_CHAINS_RAW_NETWORK_ID: [u8; NetworkId::LENGTH] = [0xFF; NetworkId::LENGTH];
 const ADDRESS_PAYLOAD_LENGTH: usize =
     1 + MASTER_PUBLIC_KEY_LENGTH + NetworkId::LENGTH + VIEWING_PUBLIC_KEY_LENGTH;
 const MASTER_PUBLIC_KEY_OFFSET: usize = 1;
@@ -118,45 +117,23 @@ fn master_public_key_to_bytes(
     Ok(padded)
 }
 
-fn xor_network_id(bytes: [u8; NetworkId::LENGTH]) -> [u8; NetworkId::LENGTH] {
-    let mut encoded = [0_u8; NetworkId::LENGTH];
-    for (index, byte) in bytes.iter().enumerate() {
-        encoded[index] = *byte ^ NETWORK_ID_XOR_MASK[index];
-    }
-    encoded
-}
-
-fn encode_network_id(scope: ChainScope) -> Result<NetworkId, AddressEncodingError> {
-    let raw = match scope {
-        ChainScope::AllChains => ALL_CHAINS_RAW_NETWORK_ID,
-        ChainScope::Chain(chain) => {
-            if chain.chain_type().get() == u8::MAX && chain.chain_id() == RailgunChain::MAX_CHAIN_ID
-            {
-                return Err(AddressEncodingError::ReservedNetworkId);
-            }
-
-            let packed = (u64::from(chain.chain_type().get()) << 56) | chain.chain_id();
-            packed.to_be_bytes()
+impl From<NetworkIdError> for AddressEncodingError {
+    fn from(error: NetworkIdError) -> Self {
+        match error {
+            NetworkIdError::ReservedNetworkId => Self::ReservedNetworkId,
+            NetworkIdError::InvalidNetworkId => Self::InvalidBech32mEncoding,
         }
-    };
-
-    Ok(NetworkId::new(xor_network_id(raw)))
+    }
 }
 
-fn decode_network_id(network_id: NetworkId) -> Result<ChainScope, AddressDecodingError> {
-    let raw = xor_network_id(*network_id.as_bytes());
-    if raw == ALL_CHAINS_RAW_NETWORK_ID {
-        return Ok(ChainScope::AllChains);
+impl From<NetworkIdError> for AddressDecodingError {
+    fn from(error: NetworkIdError) -> Self {
+        match error {
+            NetworkIdError::ReservedNetworkId | NetworkIdError::InvalidNetworkId => {
+                Self::InvalidNetworkId
+            }
+        }
     }
-
-    let packed = u64::from_be_bytes(raw);
-    let chain_type = railgun_types::ChainType::new(
-        u8::try_from(packed >> 56).map_err(|_| AddressDecodingError::InvalidNetworkId)?,
-    );
-    let chain_id = packed & RailgunChain::MAX_CHAIN_ID;
-    let chain = RailgunChain::new(chain_type, chain_id)
-        .map_err(|_| AddressDecodingError::InvalidNetworkId)?;
-    Ok(ChainScope::Chain(chain))
 }
 
 /// Encodes a canonical `0zk` Railgun address.
@@ -245,97 +222,8 @@ mod tests {
 
     use super::{
         ADDRESS_MAX_LENGTH, ADDRESS_PAYLOAD_LENGTH, ADDRESS_VERSION_V1, AddressDecodingError,
-        AddressEncodingError, decode_network_id, decode_railgun_address, encode_network_id,
-        encode_railgun_address,
+        AddressEncodingError, decode_railgun_address, encode_railgun_address,
     };
-
-    #[test]
-    fn encodes_network_id_vector_one() {
-        let chain = RailgunChain::new(ChainType::new(0), 1)
-            .unwrap_or_else(|_| panic!("test chain should be valid"));
-
-        assert_eq!(
-            hex_encode(
-                encode_network_id(ChainScope::Chain(chain))
-                    .unwrap_or_else(|_| panic!("network id encoding should succeed"))
-                    .as_bytes(),
-            ),
-            "7261696c67756e01"
-        );
-    }
-
-    #[test]
-    fn decodes_network_id_vector_one() {
-        let chain = RailgunChain::new(ChainType::new(0), 1)
-            .unwrap_or_else(|_| panic!("test chain should be valid"));
-
-        assert_eq!(
-            decode_network_id(network_id_from_hex("7261696c67756e01"))
-                .unwrap_or_else(|_| panic!("network id decoding should succeed")),
-            ChainScope::Chain(chain)
-        );
-    }
-
-    #[test]
-    fn encodes_network_id_vector_two() {
-        let chain = RailgunChain::new(ChainType::new(1), 56)
-            .unwrap_or_else(|_| panic!("test chain should be valid"));
-
-        assert_eq!(
-            hex_encode(
-                encode_network_id(ChainScope::Chain(chain))
-                    .unwrap_or_else(|_| panic!("network id encoding should succeed"))
-                    .as_bytes(),
-            ),
-            "7361696c67756e38"
-        );
-    }
-
-    #[test]
-    fn decodes_network_id_vector_two() {
-        let chain = RailgunChain::new(ChainType::new(1), 56)
-            .unwrap_or_else(|_| panic!("test chain should be valid"));
-
-        assert_eq!(
-            decode_network_id(network_id_from_hex("7361696c67756e38"))
-                .unwrap_or_else(|_| panic!("network id decoding should succeed")),
-            ChainScope::Chain(chain)
-        );
-    }
-
-    #[test]
-    fn encodes_network_id_all_chains_vector() {
-        assert_eq!(
-            hex_encode(
-                encode_network_id(ChainScope::AllChains)
-                    .unwrap_or_else(|_| panic!("network id encoding should succeed"))
-                    .as_bytes(),
-            ),
-            "8d9e9693988a91ff"
-        );
-    }
-
-    #[test]
-    fn decodes_network_id_all_chains_vector() {
-        assert_eq!(
-            decode_network_id(network_id_from_hex("8d9e9693988a91ff"))
-                .unwrap_or_else(|_| panic!("network id decoding should succeed")),
-            ChainScope::AllChains
-        );
-    }
-
-    #[test]
-    fn rejects_reserved_network_id_collision_during_encoding() {
-        let chain = RailgunChain::new(ChainType::new(u8::MAX), RailgunChain::MAX_CHAIN_ID)
-            .unwrap_or_else(|_| panic!("collision chain should still be a valid raw chain"));
-
-        let error = expect_err(
-            encode_network_id(ChainScope::Chain(chain)),
-            "reserved network id collision should fail",
-        );
-
-        assert_eq!(error, AddressEncodingError::ReservedNetworkId);
-    }
 
     #[test]
     fn encodes_address_vector_one() {
@@ -617,11 +505,6 @@ mod tests {
             .unwrap_or_else(|| panic!("oversized chain id should fail"));
 
         assert_eq!(error.to_string(), "chain id must fit within 56 bits");
-    }
-
-    fn network_id_from_hex(hex: &str) -> railgun_types::NetworkId {
-        railgun_types::NetworkId::from_slice(&hex_decode(hex))
-            .unwrap_or_else(|_| panic!("test network id should be valid"))
     }
 
     fn bech32_address_from_payload(payload: Vec<u8>) -> String {

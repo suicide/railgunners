@@ -4,6 +4,7 @@ pub mod address;
 pub mod bip39;
 pub mod hd;
 pub mod keys;
+pub mod network_id;
 pub mod shareable_viewing_key;
 
 use railgun_types::{Address, ChainId, TxHash};
@@ -22,6 +23,7 @@ pub use keys::{
     derive_viewing_key_pair, derive_viewing_public_key, derive_viewing_public_key_from_bytes,
     spending_private_key_from_node, viewing_private_key_from_node,
 };
+pub use network_id::{NetworkIdError, decode_network_id, encode_network_id};
 pub use shareable_viewing_key::{
     ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
     pack_spending_public_key, unpack_spending_public_key,
