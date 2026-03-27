@@ -1,5 +1,6 @@
 //! Shared protocol traits and errors for the RAILGUN workspace.
 
+pub mod address;
 pub mod bip39;
 pub mod hd;
 pub mod keys;
@@ -7,6 +8,7 @@ pub mod shareable_viewing_key;
 
 use railgun_types::{Address, ChainId, TxHash};
 
+pub use address::{AddressEncodingError, encode_railgun_address};
 pub use bip39::{Bip39Error, Bip39Mnemonic};
 pub use hd::{
     DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,

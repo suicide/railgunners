@@ -305,6 +305,121 @@ impl ShareableViewingKeyData {
     }
 }
 
+/// Typed 8-byte Railgun network identifier used inside `0zk` addresses.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct NetworkId([u8; 8]);
+
+impl NetworkId {
+    /// Length of an encoded network identifier in bytes.
+    pub const LENGTH: usize = 8;
+
+    /// Creates a network identifier from raw bytes.
+    #[must_use]
+    pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
+        Self(bytes)
+    }
+
+    /// Creates a network identifier from a byte slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `bytes` is not exactly 8 bytes long.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, ParseDomainError> {
+        let array: [u8; Self::LENGTH] = bytes
+            .try_into()
+            .map_err(|_| ParseDomainError::new("network id must be exactly 8 bytes"))?;
+        Ok(Self::new(array))
+    }
+
+    /// Returns the raw network identifier bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+}
+
+/// Typed Railgun chain-type discriminator.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ChainType(u8);
+
+impl ChainType {
+    /// Creates a chain type from its raw numeric value.
+    #[must_use]
+    pub const fn new(value: u8) -> Self {
+        Self(value)
+    }
+
+    /// Returns the inner numeric value.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+/// Typed Railgun chain reference packed into a network identifier.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RailgunChain {
+    chain_type: ChainType,
+    chain_id: u64,
+}
+
+impl RailgunChain {
+    /// Maximum supported chain identifier width inside a network identifier.
+    pub const MAX_CHAIN_ID: u64 = (1_u64 << 56) - 1;
+
+    /// Creates a chain reference from explicit type and identifier values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `chain_id` exceeds the supported 56-bit range.
+    pub fn new(chain_type: ChainType, chain_id: u64) -> Result<Self, ParseDomainError> {
+        if chain_id > Self::MAX_CHAIN_ID {
+            return Err(ParseDomainError::new("chain id must fit within 56 bits"));
+        }
+
+        Ok(Self { chain_type, chain_id })
+    }
+
+    /// Returns the chain type.
+    #[must_use]
+    pub const fn chain_type(self) -> ChainType {
+        self.chain_type
+    }
+
+    /// Returns the chain identifier.
+    #[must_use]
+    pub const fn chain_id(self) -> u64 {
+        self.chain_id
+    }
+}
+
+/// Typed address scope for a specific chain or all chains.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ChainScope {
+    /// Address is valid across all supported chains.
+    AllChains,
+    /// Address is scoped to one chain.
+    Chain(RailgunChain),
+}
+
+/// Typed encoded `0zk` Railgun address.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RailgunAddress(String);
+
+impl RailgunAddress {
+    /// Creates a Railgun address from its encoded string form.
+    #[must_use]
+    pub fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    /// Returns the encoded address string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Typed EVM address.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Address([u8; 20]);
