@@ -8,7 +8,9 @@ pub mod shareable_viewing_key;
 
 use railgun_types::{Address, ChainId, TxHash};
 
-pub use address::{AddressEncodingError, encode_railgun_address};
+pub use address::{
+    AddressDecodingError, AddressEncodingError, decode_railgun_address, encode_railgun_address,
+};
 pub use bip39::{Bip39Error, Bip39Mnemonic};
 pub use hd::{
     DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,

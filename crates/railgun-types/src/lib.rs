@@ -420,6 +420,52 @@ impl RailgunAddress {
     }
 }
 
+/// Typed decoded `0zk` Railgun address payload.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RailgunAddressData {
+    version: u8,
+    master_public_key: MasterPublicKey,
+    chain_scope: ChainScope,
+    viewing_public_key: ViewingPublicKey,
+}
+
+impl RailgunAddressData {
+    /// Creates decoded address data from explicit components.
+    #[must_use]
+    pub const fn new(
+        version: u8,
+        master_public_key: MasterPublicKey,
+        chain_scope: ChainScope,
+        viewing_public_key: ViewingPublicKey,
+    ) -> Self {
+        Self { version, master_public_key, chain_scope, viewing_public_key }
+    }
+
+    /// Returns the decoded address version.
+    #[must_use]
+    pub const fn version(&self) -> u8 {
+        self.version
+    }
+
+    /// Returns the decoded master public key.
+    #[must_use]
+    pub const fn master_public_key(&self) -> &MasterPublicKey {
+        &self.master_public_key
+    }
+
+    /// Returns the decoded chain scope.
+    #[must_use]
+    pub const fn chain_scope(&self) -> ChainScope {
+        self.chain_scope
+    }
+
+    /// Returns the decoded viewing public key.
+    #[must_use]
+    pub const fn viewing_public_key(&self) -> &ViewingPublicKey {
+        &self.viewing_public_key
+    }
+}
+
 /// Typed EVM address.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Address([u8; 20]);
