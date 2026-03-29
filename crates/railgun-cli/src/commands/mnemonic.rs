@@ -1,5 +1,10 @@
-use crate::{cli::MnemonicCommand, error::CliError, output::write_json};
-use railgun_core::{Bip39Mnemonic, Bip39WordCount};
+use crate::{
+    cli::MnemonicCommand,
+    error::CliError,
+    output::write_json,
+    workflows::mnemonic::{generate_mnemonic, mnemonic_seed_hex, validate_mnemonic},
+};
+use railgun_core::Bip39WordCount;
 use serde::Serialize;
 use std::io::Write;
 
@@ -9,7 +14,7 @@ pub(crate) fn execute(command: MnemonicCommand, stdout: &mut dyn Write) -> Resul
             let word_count = Bip39WordCount::try_from(words).map_err(|error| {
                 CliError::command(format!("invalid --words value: {error}"), json)
             })?;
-            let mnemonic = Bip39Mnemonic::generate(word_count)
+            let mnemonic = generate_mnemonic(word_count)
                 .map_err(|error| CliError::command(error.to_string(), json))?;
             let phrase = mnemonic.phrase();
 
@@ -22,7 +27,7 @@ pub(crate) fn execute(command: MnemonicCommand, stdout: &mut dyn Write) -> Resul
                 writeln!(stdout, "{phrase}")?;
             }
         }
-        MnemonicCommand::Validate { mnemonic, json } => match Bip39Mnemonic::parse(&mnemonic) {
+        MnemonicCommand::Validate { mnemonic, json } => match validate_mnemonic(&mnemonic) {
             Ok(_) => {
                 if json {
                     write_json(stdout, &ValidationSuccessJson { valid: true })?;
@@ -48,9 +53,9 @@ pub(crate) fn execute(command: MnemonicCommand, stdout: &mut dyn Write) -> Resul
                 ));
             }
 
-            let mnemonic = Bip39Mnemonic::parse(&mnemonic)
+            let mnemonic = validate_mnemonic(&mnemonic)
                 .map_err(|error| CliError::command(format!("invalid: {error}"), json))?;
-            let seed = hex::encode(mnemonic.seed(password.as_deref()));
+            let seed = mnemonic_seed_hex(&mnemonic, password.as_deref());
 
             if json {
                 write_json(stdout, &SeedJson { seed: &seed })?;

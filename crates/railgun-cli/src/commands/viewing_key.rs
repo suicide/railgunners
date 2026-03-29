@@ -3,10 +3,9 @@ use crate::{
     error::CliError,
     output::write_json,
     parse::{parse_chain_scope, parse_packed_spending_public_key, parse_viewing_private_key},
+    workflows::viewing_key::inspect_shareable_viewing_key,
 };
-use railgun_core::{
-    encode_shareable_viewing_key, inspect_shareable_viewing_key, unpack_spending_public_key,
-};
+use railgun_core::{encode_shareable_viewing_key, unpack_spending_public_key};
 use railgun_types::ShareableViewingKeyData;
 use serde::Serialize;
 use std::io::Write;
@@ -123,7 +122,9 @@ struct DecodedViewingKeyJson {
 }
 
 impl DecodedViewingKeyJson {
-    fn from_inspection(inspection: &railgun_core::ShareableViewingKeyInspection) -> Self {
+    fn from_inspection(
+        inspection: &crate::workflows::viewing_key::ShareableViewingKeyInspection,
+    ) -> Self {
         Self {
             viewing_private_key: hex::encode(inspection.payload().viewing_private_key().as_bytes()),
             packed_spending_public_key: hex::encode(

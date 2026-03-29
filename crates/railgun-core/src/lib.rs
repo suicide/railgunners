@@ -18,17 +18,14 @@ pub use hd::{
     derive_node_from_str, derive_spending_node, derive_viewing_node, spending_path, viewing_path,
 };
 pub use keys::{
-    DerivedWalletKeys, ViewingKeyInspection, derive_master_public_key, derive_nullifying_key,
-    derive_nullifying_key_from_bytes, derive_spending_key_pair, derive_spending_public_key,
-    derive_spending_public_key_from_bytes, derive_viewing_key_pair, derive_viewing_public_key,
-    derive_viewing_public_key_from_bytes, derive_wallet_keys, inspect_master_public_key,
-    inspect_spending_private_key, inspect_viewing_private_key, spending_private_key_from_node,
-    viewing_private_key_from_node,
+    derive_master_public_key, derive_nullifying_key, derive_nullifying_key_from_bytes,
+    derive_spending_key_pair, derive_spending_public_key, derive_spending_public_key_from_bytes,
+    derive_viewing_key_pair, derive_viewing_public_key, derive_viewing_public_key_from_bytes,
+    spending_private_key_from_node, viewing_private_key_from_node,
 };
 pub use network_id::{NetworkIdError, decode_network_id, encode_network_id};
 pub use shareable_viewing_key::{
-    ShareableViewingKeyError, ShareableViewingKeyInspection, ShareableViewingKeyInspectionError,
-    decode_shareable_viewing_key, encode_shareable_viewing_key, inspect_shareable_viewing_key,
+    ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
     pack_spending_public_key, unpack_spending_public_key,
 };
 

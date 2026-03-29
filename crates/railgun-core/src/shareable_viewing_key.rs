@@ -5,121 +5,9 @@ use core::fmt;
 use babyjubjub_rs::{Fr as BabyJubJubField, Point, decompress_point};
 use ff::{PrimeField as _, PrimeFieldRepr as _};
 use num_bigint::BigUint;
-use railgun_types::{
-    ChainScope, PackedSpendingPublicKey, RailgunAddress, ShareableViewingKeyData,
-    SpendingPublicKey, ViewingPublicKey,
-};
+use railgun_types::{PackedSpendingPublicKey, ShareableViewingKeyData, SpendingPublicKey};
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
-
-use crate::{
-    AddressEncodingError, derive_master_public_key, derive_nullifying_key,
-    derive_viewing_public_key, encode_railgun_address,
-};
-
-/// Fully inspected shareable viewing key data.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ShareableViewingKeyInspection {
-    payload: ShareableViewingKeyData,
-    spending_public_key: SpendingPublicKey,
-    viewing_public_key: ViewingPublicKey,
-    nullifying_key: railgun_types::NullifyingKey,
-    master_public_key: railgun_types::MasterPublicKey,
-    address: RailgunAddress,
-}
-
-impl ShareableViewingKeyInspection {
-    /// Creates an inspection result from explicit components.
-    #[must_use]
-    pub const fn new(
-        payload: ShareableViewingKeyData,
-        spending_public_key: SpendingPublicKey,
-        viewing_public_key: ViewingPublicKey,
-        nullifying_key: railgun_types::NullifyingKey,
-        master_public_key: railgun_types::MasterPublicKey,
-        address: RailgunAddress,
-    ) -> Self {
-        Self {
-            payload,
-            spending_public_key,
-            viewing_public_key,
-            nullifying_key,
-            master_public_key,
-            address,
-        }
-    }
-
-    /// Returns the decoded shareable viewing key payload.
-    #[must_use]
-    pub const fn payload(&self) -> &ShareableViewingKeyData {
-        &self.payload
-    }
-
-    /// Returns the unpacked spending public key.
-    #[must_use]
-    pub const fn spending_public_key(&self) -> &SpendingPublicKey {
-        &self.spending_public_key
-    }
-
-    /// Returns the viewing public key derived from `vpriv`.
-    #[must_use]
-    pub const fn viewing_public_key(&self) -> &ViewingPublicKey {
-        &self.viewing_public_key
-    }
-
-    /// Returns the nullifying key derived from `vpriv`.
-    #[must_use]
-    pub const fn nullifying_key(&self) -> &railgun_types::NullifyingKey {
-        &self.nullifying_key
-    }
-
-    /// Returns the master public key derived from `spub` and the nullifying key.
-    #[must_use]
-    pub const fn master_public_key(&self) -> &railgun_types::MasterPublicKey {
-        &self.master_public_key
-    }
-
-    /// Returns the derived Railgun address.
-    #[must_use]
-    pub const fn address(&self) -> &RailgunAddress {
-        &self.address
-    }
-}
-
-/// Error returned when shareable viewing key inspection fails.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ShareableViewingKeyInspectionError {
-    /// The encoded payload is malformed.
-    ShareableViewingKey(ShareableViewingKeyError),
-    /// The nullifying or master public key could not be derived.
-    KeyDerivation,
-    /// Address encoding failed.
-    AddressEncoding(AddressEncodingError),
-}
-
-impl fmt::Display for ShareableViewingKeyInspectionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ShareableViewingKey(error) => write!(formatter, "{error}"),
-            Self::KeyDerivation => formatter.write_str("failed to derive view-only key material"),
-            Self::AddressEncoding(error) => write!(formatter, "{error}"),
-        }
-    }
-}
-
-impl std::error::Error for ShareableViewingKeyInspectionError {}
-
-impl From<ShareableViewingKeyError> for ShareableViewingKeyInspectionError {
-    fn from(value: ShareableViewingKeyError) -> Self {
-        Self::ShareableViewingKey(value)
-    }
-}
-
-impl From<AddressEncodingError> for ShareableViewingKeyInspectionError {
-    fn from(value: AddressEncodingError) -> Self {
-        Self::AddressEncoding(value)
-    }
-}
 
 /// Error returned when a shareable viewing key payload is malformed.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -304,44 +192,13 @@ pub fn decode_shareable_viewing_key(
     Ok(ShareableViewingKeyData::new(viewing_private_key, packed_spending_public_key))
 }
 
-/// Decodes and inspects a shareable viewing key, deriving public-facing values.
-///
-/// # Errors
-///
-/// Returns an error if decoding fails, if view-only key derivation fails, or if
-/// the derived address cannot be encoded.
-pub fn inspect_shareable_viewing_key(
-    payload: &str,
-    chain_scope: ChainScope,
-) -> Result<ShareableViewingKeyInspection, ShareableViewingKeyInspectionError> {
-    let payload = decode_shareable_viewing_key(payload)?;
-    let spending_public_key = unpack_spending_public_key(payload.packed_spending_public_key())?;
-    let viewing_public_key = derive_viewing_public_key(payload.viewing_private_key());
-    let nullifying_key = derive_nullifying_key(payload.viewing_private_key())
-        .map_err(|_| ShareableViewingKeyInspectionError::KeyDerivation)?;
-    let master_public_key = derive_master_public_key(&spending_public_key, &nullifying_key)
-        .map_err(|_| ShareableViewingKeyInspectionError::KeyDerivation)?;
-    let address = encode_railgun_address(1, &master_public_key, chain_scope, &viewing_public_key)?;
-
-    Ok(ShareableViewingKeyInspection::new(
-        payload,
-        spending_public_key,
-        viewing_public_key,
-        nullifying_key,
-        master_public_key,
-        address,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         ShareableViewingKeyError, ShareableViewingKeyPayload, decode_shareable_viewing_key,
-        encode_shareable_viewing_key, inspect_shareable_viewing_key, pack_spending_public_key,
-        unpack_spending_public_key,
+        encode_shareable_viewing_key, pack_spending_public_key, unpack_spending_public_key,
     };
     use crate::{derive_master_public_key, derive_nullifying_key, derive_spending_public_key};
-    use railgun_types::ChainScope;
     use railgun_types::{ShareableViewingKeyData, SpendingPrivateKey, ViewingPrivateKey};
     use serde::Serialize;
     use serde_bytes::ByteBuf;
@@ -453,32 +310,6 @@ mod tests {
             master_public_key.value().to_string(),
             "15607618471549356314064749634364841401625982784343012680230632021308514635691"
         );
-    }
-
-    #[test]
-    fn inspects_shareable_viewing_key_and_derives_all_chains_address() {
-        let viewing_private_key = ViewingPrivateKey::new(hex_array::<32>(
-            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
-        ));
-        let spending_public_key = derive_spending_public_key(&SpendingPrivateKey::new(
-            hex_array::<32>("67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef"),
-        ))
-        .unwrap_or_else(|_| panic!("spending public key derivation should succeed"));
-        let packed_spending_public_key = pack_spending_public_key(&spending_public_key)
-            .unwrap_or_else(|_| panic!("spending public key packing should succeed"));
-        let payload = ShareableViewingKeyData::new(viewing_private_key, packed_spending_public_key);
-        let encoded = encode_shareable_viewing_key(&payload)
-            .unwrap_or_else(|_| panic!("shareable viewing key encoding should succeed"));
-        let inspection = inspect_shareable_viewing_key(&encoded, ChainScope::AllChains)
-            .unwrap_or_else(|_| panic!("shareable viewing key inspection should succeed"));
-
-        assert_eq!(inspection.payload(), &payload);
-        assert_eq!(inspection.spending_public_key(), &spending_public_key);
-        assert_eq!(
-            inspection.master_public_key().value().to_string(),
-            "15607618471549356314064749634364841401625982784343012680230632021308514635691"
-        );
-        assert!(inspection.address().as_str().starts_with("0zk1"));
     }
 
     #[test]

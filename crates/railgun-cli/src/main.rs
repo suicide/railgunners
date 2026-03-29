@@ -5,6 +5,7 @@ mod commands;
 mod error;
 mod output;
 mod parse;
+mod workflows;
 
 use clap::Parser;
 use cli::{Cli, Command};

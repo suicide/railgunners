@@ -3,10 +3,11 @@ use crate::{
     error::CliError,
     output::write_json,
     parse::{parse_decimal_biguint, parse_spending_private_key, parse_viewing_private_key},
-};
-use railgun_core::{
-    DerivedWalletKeys, derive_wallet_keys, inspect_master_public_key, inspect_spending_private_key,
-    inspect_viewing_private_key, pack_spending_public_key,
+    workflows::keys::{
+        DerivedWalletKeys, derive_wallet_keys, inspect_master_public_key,
+        inspect_spending_private_key, inspect_viewing_private_key,
+        pack_derived_spending_public_key,
+    },
 };
 use railgun_types::{NullifyingKey, SpendingPublicKey};
 use serde::Serialize;
@@ -27,7 +28,7 @@ pub(crate) fn execute(command: KeysCommand, stdout: &mut dyn Write) -> Result<()
             let derived = derive_wallet_keys(&mnemonic, index)
                 .map_err(|error| CliError::command(error.to_string(), json))?;
             let packed_spending_public_key =
-                pack_spending_public_key(derived.spending_public_key())
+                pack_derived_spending_public_key(derived.spending_public_key())
                     .map_err(|error| CliError::command(error.to_string(), json))?;
 
             if json {
