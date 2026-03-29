@@ -2,6 +2,50 @@
 
 use bip39::{Language, Mnemonic};
 
+/// Supported English BIP-39 mnemonic word counts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Bip39WordCount {
+    /// 12-word mnemonic.
+    Words12,
+    /// 15-word mnemonic.
+    Words15,
+    /// 18-word mnemonic.
+    Words18,
+    /// 21-word mnemonic.
+    Words21,
+    /// 24-word mnemonic.
+    Words24,
+}
+
+impl Bip39WordCount {
+    /// Returns the numeric word count.
+    #[must_use]
+    pub const fn as_usize(self) -> usize {
+        match self {
+            Self::Words12 => 12,
+            Self::Words15 => 15,
+            Self::Words18 => 18,
+            Self::Words21 => 21,
+            Self::Words24 => 24,
+        }
+    }
+}
+
+impl TryFrom<usize> for Bip39WordCount {
+    type Error = Bip39Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            12 => Ok(Self::Words12),
+            15 => Ok(Self::Words15),
+            18 => Ok(Self::Words18),
+            21 => Ok(Self::Words21),
+            24 => Ok(Self::Words24),
+            _ => Err(Bip39Error::UnsupportedWordCount(value)),
+        }
+    }
+}
+
 /// Error returned when BIP-39 parsing or validation fails.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Bip39Error {
@@ -50,6 +94,16 @@ pub struct Bip39Mnemonic {
 }
 
 impl Bip39Mnemonic {
+    /// Generates a new English BIP-39 mnemonic phrase.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the requested word count is unsupported by BIP-39.
+    pub fn generate(word_count: Bip39WordCount) -> Result<Self, Bip39Error> {
+        let inner = Mnemonic::generate_in(Language::English, word_count.as_usize())?;
+        Ok(Self { inner })
+    }
+
     /// Parses and validates an English BIP-39 mnemonic phrase.
     ///
     /// # Errors
@@ -84,6 +138,12 @@ impl Bip39Mnemonic {
     pub fn word_count(&self) -> usize {
         self.inner.word_count()
     }
+
+    /// Returns the mnemonic phrase as a normalized string.
+    #[must_use]
+    pub fn phrase(&self) -> String {
+        self.inner.to_string()
+    }
 }
 
 impl core::str::FromStr for Bip39Mnemonic {
@@ -98,7 +158,35 @@ impl core::str::FromStr for Bip39Mnemonic {
 mod tests {
     use core::fmt::Write as _;
 
-    use super::{Bip39Error, Bip39Mnemonic};
+    use super::{Bip39Error, Bip39Mnemonic, Bip39WordCount};
+
+    #[test]
+    fn generates_supported_word_counts() {
+        for word_count in [
+            Bip39WordCount::Words12,
+            Bip39WordCount::Words15,
+            Bip39WordCount::Words18,
+            Bip39WordCount::Words21,
+            Bip39WordCount::Words24,
+        ] {
+            let Ok(mnemonic) = Bip39Mnemonic::generate(word_count) else {
+                panic!("supported word count should generate");
+            };
+            let phrase = mnemonic.phrase();
+
+            assert_eq!(mnemonic.word_count(), word_count.as_usize());
+            assert!(Bip39Mnemonic::is_valid(&phrase));
+        }
+    }
+
+    #[test]
+    fn rejects_unsupported_generated_word_count() {
+        let Err(error) = Bip39WordCount::try_from(13) else {
+            panic!("unsupported word count should fail");
+        };
+
+        assert_eq!(error, Bip39Error::UnsupportedWordCount(13));
+    }
 
     #[test]
     fn parses_and_derives_issue_vector_one() {

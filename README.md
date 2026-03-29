@@ -62,6 +62,26 @@ nix flake check
 nix build .#default
 ```
 
+## CLI
+
+The workspace includes a small offline-first CLI in `crates/railgun-cli`.
+
+Current mnemonic commands:
+
+```sh
+railgun-rs mnemonic generate
+railgun-rs mnemonic generate --words 24 --json
+railgun-rs mnemonic validate --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+railgun-rs mnemonic seed --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --show-secrets --json
+```
+
+Notes:
+
+- `generate` supports `--words` values `12`, `15`, `18`, `21`, and `24`
+- `validate` prints `valid` on success and exits non-zero on failure
+- `seed` requires `--show-secrets` so secret-bearing output is always explicit
+- `--json` emits stable machine-readable output for scripting
+
 ## Status
 
 This is early-stage infrastructure work. The focus right now is on architectural clarity, crate boundaries, and contribution rules before implementing issue-driven functionality.

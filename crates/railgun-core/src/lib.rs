@@ -12,7 +12,7 @@ use railgun_types::{Address, ChainId, TxHash};
 pub use address::{
     AddressDecodingError, AddressEncodingError, decode_railgun_address, encode_railgun_address,
 };
-pub use bip39::{Bip39Error, Bip39Mnemonic};
+pub use bip39::{Bip39Error, Bip39Mnemonic, Bip39WordCount};
 pub use hd::{
     DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,
     derive_node_from_str, derive_spending_node, derive_viewing_node, spending_path, viewing_path,
