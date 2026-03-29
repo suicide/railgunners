@@ -167,7 +167,7 @@ mod tests {
         let mut encode_stderr = Vec::new();
         let encode_exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "viewing-key",
                 "encode",
                 "--viewing-private-key",
@@ -214,7 +214,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "viewing-key",
                 "decode",
                 "--shareable-viewing-key",
@@ -238,7 +238,7 @@ mod tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let exit_code = run(
-            ["railgun-rs", "viewing-key", "decode", "--shareable-viewing-key", "deadbeef"],
+            ["railguncli", "viewing-key", "decode", "--shareable-viewing-key", "deadbeef"],
             &mut stdout,
             &mut stderr,
         );
@@ -257,7 +257,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "viewing-key",
                 "decode",
                 "--shareable-viewing-key",

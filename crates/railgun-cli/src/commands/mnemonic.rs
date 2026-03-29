@@ -101,7 +101,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "mnemonic",
                 "validate",
                 "--mnemonic",
@@ -122,7 +122,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "mnemonic",
                 "validate",
                 "--mnemonic",
@@ -147,7 +147,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "mnemonic",
                 "seed",
                 "--mnemonic",
@@ -173,7 +173,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "mnemonic",
                 "seed",
                 "--mnemonic",
@@ -193,7 +193,7 @@ mod tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let exit_code = run(
-            ["railgun-rs", "mnemonic", "generate", "--words", "24", "--json"],
+            ["railguncli", "mnemonic", "generate", "--words", "24", "--json"],
             &mut stdout,
             &mut stderr,
         );

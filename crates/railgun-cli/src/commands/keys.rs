@@ -222,7 +222,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "keys",
                 "derive",
                 "--mnemonic",
@@ -248,7 +248,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "keys",
                 "derive",
                 "--mnemonic",
@@ -269,7 +269,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "keys",
                 "inspect-viewing-private",
                 "--private-key",
@@ -294,7 +294,7 @@ mod tests {
         let mut stderr = Vec::new();
         let exit_code = run(
             [
-                "railgun-rs",
+                "railguncli",
                 "keys",
                 "inspect-master-public",
                 "--spending-public-key-x",
@@ -322,7 +322,7 @@ mod tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let exit_code = run(
-            ["railgun-rs", "keys", "inspect-viewing-private", "--private-key", "xyz"],
+            ["railguncli", "keys", "inspect-viewing-private", "--private-key", "xyz"],
             &mut stdout,
             &mut stderr,
         );

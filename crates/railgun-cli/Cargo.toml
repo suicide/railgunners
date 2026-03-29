@@ -11,7 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [[bin]]
-name = "railgun-rs"
+name = "railguncli"
 path = "src/main.rs"
 
 [dependencies]

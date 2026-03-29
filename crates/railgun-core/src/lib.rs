@@ -123,5 +123,5 @@ pub trait WalletStore {
 /// Returns a shared workspace identity value.
 #[must_use]
 pub const fn sdk_info() -> SdkInfo {
-    SdkInfo { name: "railgun-rs", version: env!("CARGO_PKG_VERSION") }
+    SdkInfo { name: "railguncli", version: env!("CARGO_PKG_VERSION") }
 }

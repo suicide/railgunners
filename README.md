@@ -69,10 +69,10 @@ The workspace includes a small offline-first CLI in `crates/railgun-cli`.
 Current mnemonic commands:
 
 ```sh
-railgun-rs mnemonic generate
-railgun-rs mnemonic generate --words 24 --json
-railgun-rs mnemonic validate --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
-railgun-rs mnemonic seed --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --show-secrets --json
+railguncli mnemonic generate
+railguncli mnemonic generate --words 24 --json
+railguncli mnemonic validate --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+railguncli mnemonic seed --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --show-secrets --json
 ```
 
 Notes:
@@ -85,10 +85,10 @@ Notes:
 Current key commands:
 
 ```sh
-railgun-rs keys derive --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --index 0 --show-secrets --json
-railgun-rs keys inspect-viewing-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
-railgun-rs keys inspect-spending-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
-railgun-rs keys inspect-master-public --spending-public-key-x "15684838006997671713939066069845237677934334329285343229142447933587909549584" --spending-public-key-y "11878614856120328179849762231924033298788609151532558727282528569229552954628" --nullifying-key "8368299126798249740586535953124199418524409103803955764525436743456763691384" --json
+railguncli keys derive --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --index 0 --show-secrets --json
+railguncli keys inspect-viewing-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
+railguncli keys inspect-spending-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
+railguncli keys inspect-master-public --spending-public-key-x "15684838006997671713939066069845237677934334329285343229142447933587909549584" --spending-public-key-y "11878614856120328179849762231924033298788609151532558727282528569229552954628" --nullifying-key "8368299126798249740586535953124199418524409103803955764525436743456763691384" --json
 ```
 
 Notes:
@@ -104,9 +104,9 @@ Notes:
 Current shareable viewing key commands:
 
 ```sh
-railgun-rs viewing-key encode --viewing-private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --packed-spending-public-key "eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
-railgun-rs viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
-railgun-rs viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --chain-type 0 --chain-id 1 --show-secrets --json
+railguncli viewing-key encode --viewing-private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --packed-spending-public-key "eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
+railguncli viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
+railguncli viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --chain-type 0 --chain-id 1 --show-secrets --json
 ```
 
 Notes:
