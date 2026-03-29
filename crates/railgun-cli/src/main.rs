@@ -1,7 +1,12 @@
 //! Thin command-line surface for the RAILGUN workspace.
 
 use clap::{Parser, Subcommand};
-use railgun_core::{Bip39Mnemonic, Bip39WordCount, sdk_info};
+use num_bigint::BigUint;
+use railgun_core::{
+    Bip39Mnemonic, Bip39WordCount, derive_wallet_keys, inspect_master_public_key,
+    inspect_spending_private_key, inspect_viewing_private_key, sdk_info,
+};
+use railgun_types::{NullifyingKey, SpendingPrivateKey, SpendingPublicKey, ViewingPrivateKey};
 use serde::Serialize;
 use std::io::{self, Write};
 
@@ -18,15 +23,14 @@ where
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(error) => {
-            let result = write!(stderr, "{}", error.render());
-            if result.is_err() {
+            if write!(stderr, "{}", error.render()).is_err() {
                 return error.exit_code();
             }
             return error.exit_code();
         }
     };
 
-    match execute(cli, stdout, stderr) {
+    match execute(cli, stdout) {
         Ok(()) => 0,
         Err(CliError::Command { message, json }) => {
             if json {
@@ -56,7 +60,7 @@ where
     }
 }
 
-fn execute(cli: Cli, stdout: &mut dyn Write, _stderr: &mut dyn Write) -> Result<(), CliError> {
+fn execute(cli: Cli, stdout: &mut dyn Write) -> Result<(), CliError> {
     match cli.command {
         Command::Version => {
             let info = sdk_info();
@@ -72,6 +76,7 @@ fn execute(cli: Cli, stdout: &mut dyn Write, _stderr: &mut dyn Write) -> Result<
             )?;
         }
         Command::Mnemonic(command) => execute_mnemonic(command, stdout)?,
+        Command::Keys(command) => execute_keys(command, stdout)?,
     }
 
     Ok(())
@@ -137,6 +142,145 @@ fn execute_mnemonic(command: MnemonicCommand, stdout: &mut dyn Write) -> Result<
     Ok(())
 }
 
+fn execute_keys(command: KeysCommand, stdout: &mut dyn Write) -> Result<(), CliError> {
+    match command {
+        KeysCommand::Derive { mnemonic, index, show_secrets, json } => {
+            if !show_secrets {
+                return Err(CliError::command(
+                    "key derivation requires --show-secrets".to_owned(),
+                    json,
+                ));
+            }
+
+            let mnemonic = Bip39Mnemonic::parse(&mnemonic)
+                .map_err(|error| CliError::command(format!("invalid: {error}"), json))?;
+            let derived = derive_wallet_keys(&mnemonic, index)
+                .map_err(|error| CliError::command(error.to_string(), json))?;
+
+            if json {
+                let payload = DerivedKeysJson::from_derived(&derived);
+                write_json(stdout, &payload)?;
+            } else {
+                writeln!(stdout, "index: {}", derived.index())?;
+                writeln!(stdout, "spendingPath: {}", derived.spending_path())?;
+                writeln!(stdout, "viewingPath: {}", derived.viewing_path())?;
+                writeln!(
+                    stdout,
+                    "spendingPrivateKey: {}",
+                    hex::encode(derived.spending_private_key().as_bytes())
+                )?;
+                writeln!(stdout, "spendingPublicKey.x: {}", derived.spending_public_key().x())?;
+                writeln!(stdout, "spendingPublicKey.y: {}", derived.spending_public_key().y())?;
+                writeln!(
+                    stdout,
+                    "viewingPrivateKey: {}",
+                    hex::encode(derived.viewing_private_key().as_bytes())
+                )?;
+                writeln!(
+                    stdout,
+                    "viewingPublicKey: {}",
+                    hex::encode(derived.viewing_public_key().as_bytes())
+                )?;
+                writeln!(stdout, "nullifyingKey: {}", derived.nullifying_key().value())?;
+                writeln!(stdout, "masterPublicKey: {}", derived.master_public_key().value())?;
+            }
+        }
+        KeysCommand::InspectViewingPrivate { private_key, json } => {
+            let private_key = parse_viewing_private_key(&private_key, json)?;
+            let inspection = inspect_viewing_private_key(&private_key)
+                .map_err(|error| CliError::command(error.to_string(), json))?;
+
+            if json {
+                write_json(
+                    stdout,
+                    &ViewingKeyInspectionJson {
+                        viewing_public_key: hex::encode(inspection.viewing_public_key().as_bytes()),
+                        nullifying_key: inspection.nullifying_key().value().to_string(),
+                    },
+                )?;
+            } else {
+                writeln!(
+                    stdout,
+                    "viewingPublicKey: {}",
+                    hex::encode(inspection.viewing_public_key().as_bytes())
+                )?;
+                writeln!(stdout, "nullifyingKey: {}", inspection.nullifying_key().value())?;
+            }
+        }
+        KeysCommand::InspectSpendingPrivate { private_key, json } => {
+            let private_key = parse_spending_private_key(&private_key, json)?;
+            let public_key = inspect_spending_private_key(&private_key)
+                .map_err(|error| CliError::command(error.to_string(), json))?;
+
+            if json {
+                write_json(
+                    stdout,
+                    &SpendingPublicKeyOnlyJson {
+                        spending_public_key: SpendingPublicKeyJson::from_key(&public_key),
+                    },
+                )?;
+            } else {
+                writeln!(stdout, "spendingPublicKey.x: {}", public_key.x())?;
+                writeln!(stdout, "spendingPublicKey.y: {}", public_key.y())?;
+            }
+        }
+        KeysCommand::InspectMasterPublic {
+            spending_public_key_x,
+            spending_public_key_y,
+            nullifying_key,
+            json,
+        } => {
+            let spending_public_key = SpendingPublicKey::new(
+                parse_decimal_biguint(&spending_public_key_x, "spending public key x", json)?,
+                parse_decimal_biguint(&spending_public_key_y, "spending public key y", json)?,
+            );
+            let nullifying_key =
+                NullifyingKey::new(parse_decimal_biguint(&nullifying_key, "nullifying key", json)?);
+            let master_public_key =
+                inspect_master_public_key(&spending_public_key, &nullifying_key)
+                    .map_err(|error| CliError::command(error.to_string(), json))?;
+
+            if json {
+                write_json(
+                    stdout,
+                    &MasterPublicKeyJson {
+                        master_public_key: master_public_key.value().to_string(),
+                    },
+                )?;
+            } else {
+                writeln!(stdout, "masterPublicKey: {}", master_public_key.value())?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_hex<const N: usize>(value: &str, label: &str, json: bool) -> Result<[u8; N], CliError> {
+    let bytes = hex::decode(value).map_err(|_| {
+        CliError::command(format!("invalid {label}: expected lowercase or uppercase hex"), json)
+    })?;
+    bytes.try_into().map_err(|_: Vec<u8>| {
+        CliError::command(format!("invalid {label}: expected {N} bytes"), json)
+    })
+}
+
+fn parse_viewing_private_key(value: &str, json: bool) -> Result<ViewingPrivateKey, CliError> {
+    let bytes = parse_hex::<32>(value, "viewing private key", json)?;
+    Ok(ViewingPrivateKey::new(bytes))
+}
+
+fn parse_spending_private_key(value: &str, json: bool) -> Result<SpendingPrivateKey, CliError> {
+    let bytes = parse_hex::<32>(value, "spending private key", json)?;
+    Ok(SpendingPrivateKey::new(bytes))
+}
+
+fn parse_decimal_biguint(value: &str, label: &str, json: bool) -> Result<BigUint, CliError> {
+    BigUint::parse_bytes(value.as_bytes(), 10).ok_or_else(|| {
+        CliError::command(format!("invalid {label}: expected unsigned decimal"), json)
+    })
+}
+
 fn write_json<T: Serialize>(stdout: &mut dyn Write, value: &T) -> Result<(), CliError> {
     serde_json::to_writer(&mut *stdout, value)?;
     writeln!(stdout)?;
@@ -159,6 +303,9 @@ enum Command {
     /// Run mnemonic-related offline workflows.
     #[command(subcommand)]
     Mnemonic(MnemonicCommand),
+    /// Derive and inspect Railgun keys.
+    #[command(subcommand)]
+    Keys(KeysCommand),
 }
 
 #[derive(Subcommand, Debug)]
@@ -192,6 +339,58 @@ enum MnemonicCommand {
         /// Explicitly allow secret-bearing output.
         #[arg(long)]
         show_secrets: bool,
+        /// Emit stable machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum KeysCommand {
+    /// Derive canonical Railgun keys from a mnemonic and wallet index.
+    Derive {
+        /// The mnemonic phrase to derive from.
+        #[arg(long)]
+        mnemonic: String,
+        /// The canonical Railgun wallet index.
+        #[arg(long, default_value_t = 0)]
+        index: u32,
+        /// Explicitly allow secret-bearing output.
+        #[arg(long)]
+        show_secrets: bool,
+        /// Emit stable machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect a viewing private key.
+    InspectViewingPrivate {
+        /// The 32-byte viewing private key in hex.
+        #[arg(long = "private-key")]
+        private_key: String,
+        /// Emit stable machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect a spending private key.
+    InspectSpendingPrivate {
+        /// The 32-byte spending private key in hex.
+        #[arg(long = "private-key")]
+        private_key: String,
+        /// Emit stable machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect master-public-key inputs.
+    InspectMasterPublic {
+        /// The spending public key x coordinate as unsigned decimal.
+        #[arg(long = "spending-public-key-x")]
+        spending_public_key_x: String,
+        /// The spending public key y coordinate as unsigned decimal.
+        #[arg(long = "spending-public-key-y")]
+        spending_public_key_y: String,
+        /// The nullifying key as unsigned decimal.
+        #[arg(long = "nullifying-key")]
+        nullifying_key: String,
         /// Emit stable machine-readable output.
         #[arg(long)]
         json: bool,
@@ -245,6 +444,75 @@ struct ValidationErrorJson {
 #[derive(Serialize)]
 struct SeedJson<'a> {
     seed: &'a str,
+}
+
+#[derive(Serialize)]
+struct SpendingPublicKeyJson {
+    x: String,
+    y: String,
+}
+
+impl SpendingPublicKeyJson {
+    fn from_key(key: &SpendingPublicKey) -> Self {
+        Self { x: key.x().to_string(), y: key.y().to_string() }
+    }
+}
+
+#[derive(Serialize)]
+struct DerivedKeysJson {
+    index: u32,
+    #[serde(rename = "spendingPath")]
+    spending_path: String,
+    #[serde(rename = "viewingPath")]
+    viewing_path: String,
+    #[serde(rename = "spendingPrivateKey")]
+    spending_private_key: String,
+    #[serde(rename = "spendingPublicKey")]
+    spending_public_key: SpendingPublicKeyJson,
+    #[serde(rename = "viewingPrivateKey")]
+    viewing_private_key: String,
+    #[serde(rename = "viewingPublicKey")]
+    viewing_public_key: String,
+    #[serde(rename = "nullifyingKey")]
+    nullifying_key: String,
+    #[serde(rename = "masterPublicKey")]
+    master_public_key: String,
+}
+
+impl DerivedKeysJson {
+    fn from_derived(derived: &railgun_core::DerivedWalletKeys) -> Self {
+        Self {
+            index: derived.index(),
+            spending_path: derived.spending_path().to_string(),
+            viewing_path: derived.viewing_path().to_string(),
+            spending_private_key: hex::encode(derived.spending_private_key().as_bytes()),
+            spending_public_key: SpendingPublicKeyJson::from_key(derived.spending_public_key()),
+            viewing_private_key: hex::encode(derived.viewing_private_key().as_bytes()),
+            viewing_public_key: hex::encode(derived.viewing_public_key().as_bytes()),
+            nullifying_key: derived.nullifying_key().value().to_string(),
+            master_public_key: derived.master_public_key().value().to_string(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ViewingKeyInspectionJson {
+    #[serde(rename = "viewingPublicKey")]
+    viewing_public_key: String,
+    #[serde(rename = "nullifyingKey")]
+    nullifying_key: String,
+}
+
+#[derive(Serialize)]
+struct SpendingPublicKeyOnlyJson {
+    #[serde(rename = "spendingPublicKey")]
+    spending_public_key: SpendingPublicKeyJson,
+}
+
+#[derive(Serialize)]
+struct MasterPublicKeyJson {
+    #[serde(rename = "masterPublicKey")]
+    master_public_key: String,
 }
 
 #[derive(Serialize)]
@@ -364,5 +632,128 @@ mod tests {
         assert!(output.contains("\"wordCount\":24"));
         assert!(output.contains("\"mnemonic\":\""));
         assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn derives_keys_issue_vector_as_json() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railgun-rs",
+                "keys",
+                "derive",
+                "--mnemonic",
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+                "--index",
+                "0",
+                "--show-secrets",
+                "--json",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 0);
+        assert_eq!(
+            String::from_utf8_lossy(&stdout),
+            "{\"index\":0,\"spendingPath\":\"m/44'/1984'/0'/0'/0'\",\"viewingPath\":\"m/420'/1984'/0'/0'/0'\",\"spendingPrivateKey\":\"08b2d974aa7fffd9d068b78c34434c534ddcd9343fcbf5aa12cf78e1a3c1ccb9\",\"spendingPublicKey\":{\"x\":\"21725194683971601625357993914711234354000760307317172095138789827480990690892\",\"y\":\"18185059732936663794890181151638097537207598791675324797050194801074344044960\"},\"viewingPrivateKey\":\"9a9e1ca3b9476dc8500b43f30f34104c92a3eedfd727757ffd0ad15da8e11572\",\"viewingPublicKey\":\"df2dfb942aa6fb8cf9fe60d7984cd10b20b59027e677ecb4960d764f7d42408a\",\"nullifyingKey\":\"11357301776152573321369788690304620243322420398401862164527624501081803879965\",\"masterPublicKey\":\"19349903103956176070235423774157995896840157182198600174309409106416294821789\"}\n"
+        );
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn refuses_key_derivation_without_explicit_secret_flag() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railgun-rs",
+                "keys",
+                "derive",
+                "--mnemonic",
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+                "--index",
+                "0",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(String::from_utf8_lossy(&stderr), "key derivation requires --show-secrets\n");
+    }
+
+    #[test]
+    fn inspects_viewing_private_key_issue_vector_as_json() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railgun-rs",
+                "keys",
+                "inspect-viewing-private",
+                "--private-key",
+                "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+                "--json",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 0);
+        assert_eq!(
+            String::from_utf8_lossy(&stdout),
+            "{\"viewingPublicKey\":\"0debf77d8e9436fc07a0dc3fe8bd90c2f592a08cab8dbe5f972a4783465cd6d4\",\"nullifyingKey\":\"12835268173099116305231859677177501123414588269721547120001227054861606950622\"}\n"
+        );
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn inspects_master_public_key_issue_vector_as_json() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railgun-rs",
+                "keys",
+                "inspect-master-public",
+                "--spending-public-key-x",
+                "15684838006997671713939066069845237677934334329285343229142447933587909549584",
+                "--spending-public-key-y",
+                "11878614856120328179849762231924033298788609151532558727282528569229552954628",
+                "--nullifying-key",
+                "8368299126798249740586535953124199418524409103803955764525436743456763691384",
+                "--json",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 0);
+        assert_eq!(
+            String::from_utf8_lossy(&stdout),
+            "{\"masterPublicKey\":\"20060431504059690749153982049210720252589378133547582826474262520121417617087\"}\n"
+        );
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_viewing_private_key_hex() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            ["railgun-rs", "keys", "inspect-viewing-private", "--private-key", "xyz"],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            "invalid viewing private key: expected lowercase or uppercase hex\n"
+        );
     }
 }

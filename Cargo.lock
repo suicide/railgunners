@@ -819,7 +819,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "hex",
+ "num-bigint 0.4.6",
  "railgun-core",
+ "railgun-types",
  "serde",
  "serde_json",
 ]

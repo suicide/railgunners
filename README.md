@@ -82,6 +82,24 @@ Notes:
 - `seed` requires `--show-secrets` so secret-bearing output is always explicit
 - `--json` emits stable machine-readable output for scripting
 
+Current key commands:
+
+```sh
+railgun-rs keys derive --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --index 0 --show-secrets --json
+railgun-rs keys inspect-viewing-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
+railgun-rs keys inspect-spending-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
+railgun-rs keys inspect-master-public --spending-public-key-x "15684838006997671713939066069845237677934334329285343229142447933587909549584" --spending-public-key-y "11878614856120328179849762231924033298788609151532558727282528569229552954628" --nullifying-key "8368299126798249740586535953124199418524409103803955764525436743456763691384" --json
+```
+
+Notes:
+
+- `keys derive` uses canonical Railgun wallet paths for the requested `--index`
+- `keys derive` defaults `--index` to `0`
+- `keys derive` requires `--show-secrets` because it emits private keys
+- `inspect-viewing-private` derives `viewingPublicKey` and `nullifyingKey`
+- `inspect-spending-private` derives `spendingPublicKey`
+- `inspect-master-public` derives `masterPublicKey` from decimal public inputs
+
 ## Status
 
 This is early-stage infrastructure work. The focus right now is on architectural clarity, crate boundaries, and contribution rules before implementing issue-driven functionality.
