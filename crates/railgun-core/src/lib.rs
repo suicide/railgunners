@@ -27,7 +27,8 @@ pub use keys::{
 };
 pub use network_id::{NetworkIdError, decode_network_id, encode_network_id};
 pub use shareable_viewing_key::{
-    ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
+    ShareableViewingKeyError, ShareableViewingKeyInspection, ShareableViewingKeyInspectionError,
+    decode_shareable_viewing_key, encode_shareable_viewing_key, inspect_shareable_viewing_key,
     pack_spending_public_key, unpack_spending_public_key,
 };
 

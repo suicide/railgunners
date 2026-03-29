@@ -96,9 +96,25 @@ Notes:
 - `keys derive` uses canonical Railgun wallet paths for the requested `--index`
 - `keys derive` defaults `--index` to `0`
 - `keys derive` requires `--show-secrets` because it emits private keys
+- `keys derive` also emits `packedSpendingPublicKey` so it can feed `viewing-key encode`
 - `inspect-viewing-private` derives `viewingPublicKey` and `nullifyingKey`
 - `inspect-spending-private` derives `spendingPublicKey`
 - `inspect-master-public` derives `masterPublicKey` from decimal public inputs
+
+Current shareable viewing key commands:
+
+```sh
+railgun-rs viewing-key encode --viewing-private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --packed-spending-public-key "eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
+railgun-rs viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
+railgun-rs viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --chain-type 0 --chain-id 1 --show-secrets --json
+```
+
+Notes:
+
+- `viewing-key decode` defaults address derivation to the all-chains `0zk` scope
+- pass both `--chain-type` and `--chain-id` to derive a chain-scoped address instead
+- both `encode` and `decode` require `--show-secrets` because shareable viewing keys contain the viewing private key
+- decoded output includes packed and unpacked spending public key data, plus derived viewing-key and address fields
 
 ## Status
 
