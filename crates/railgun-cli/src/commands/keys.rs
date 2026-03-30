@@ -114,9 +114,11 @@ pub(crate) fn execute(command: KeysCommand, stdout: &mut dyn Write) -> Result<()
             let spending_public_key = SpendingPublicKey::new(
                 parse_decimal_biguint(&spending_public_key_x, "spending public key x", json)?,
                 parse_decimal_biguint(&spending_public_key_y, "spending public key y", json)?,
-            );
+            )
+            .map_err(|error| CliError::command(error.to_string(), json))?;
             let nullifying_key =
-                NullifyingKey::new(parse_decimal_biguint(&nullifying_key, "nullifying key", json)?);
+                NullifyingKey::new(parse_decimal_biguint(&nullifying_key, "nullifying key", json)?)
+                    .map_err(|error| CliError::command(error.to_string(), json))?;
             let master_public_key =
                 inspect_master_public_key(&spending_public_key, &nullifying_key)
                     .map_err(|error| CliError::command(error.to_string(), json))?;

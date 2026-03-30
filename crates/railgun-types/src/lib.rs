@@ -2,7 +2,106 @@
 
 use core::fmt;
 
+use babyjubjub_rs::{Fr as BabyJubJubField, Point, decompress_point};
+use bech32::primitives::decode::CheckedHrpstring;
+use bech32::{Bech32m, Hrp};
+use ff::{PrimeField as _, PrimeFieldRepr as _};
 use num_bigint::BigUint;
+
+const BN254_SCALAR_FIELD_MODULUS_BYTES: [u8; 32] = [
+    0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
+    0x97, 0x81, 0x6a, 0x91, 0x68, 0x71, 0xca, 0x8d, 0x3c, 0x20, 0x8c, 0x16, 0xd8, 0x7c, 0xfd, 0x47,
+];
+const ADDRESS_HRP: &str = "0zk";
+const ADDRESS_MAX_LENGTH: usize = 127;
+const ADDRESS_VERSION_V1: u8 = 1;
+const ADDRESS_PAYLOAD_LENGTH: usize = 73;
+const NETWORK_ID_XOR_KEY: [u8; 8] = *b"railgun\0";
+
+fn bn254_scalar_field_modulus() -> BigUint {
+    BigUint::from_bytes_be(&BN254_SCALAR_FIELD_MODULUS_BYTES)
+}
+
+fn validate_bn254_scalar(value: &BigUint, label: &'static str) -> Result<(), ParseDomainError> {
+    if *value < bn254_scalar_field_modulus() { Ok(()) } else { Err(ParseDomainError::new(label)) }
+}
+
+fn biguint_to_babyjubjub_field(value: &BigUint) -> Result<BabyJubJubField, ParseDomainError> {
+    let field = BabyJubJubField::from_str(&value.to_string()).ok_or(ParseDomainError::new(
+        "spending public key coordinates must fit within the BabyJubJub field",
+    ))?;
+    let repr = field.into_repr();
+    let mut bytes = Vec::with_capacity(core::mem::size_of_val(repr.as_ref()));
+    repr.write_be(&mut bytes).map_err(|_| {
+        ParseDomainError::new(
+            "spending public key coordinates must fit within the BabyJubJub field",
+        )
+    })?;
+    if BigUint::from_bytes_be(&bytes) == *value {
+        Ok(field)
+    } else {
+        Err(ParseDomainError::new(
+            "spending public key coordinates must fit within the BabyJubJub field",
+        ))
+    }
+}
+
+fn decode_chain_scope(network_id: NetworkId) -> Result<ChainScope, ParseDomainError> {
+    let mut raw = [0_u8; NetworkId::LENGTH];
+    for (index, byte) in raw.iter_mut().enumerate() {
+        *byte = network_id.as_bytes()[index] ^ NETWORK_ID_XOR_KEY[index];
+    }
+
+    let decoded = u64::from_be_bytes(raw);
+    if decoded == u64::MAX {
+        return Ok(ChainScope::AllChains);
+    }
+
+    let chain_type = ChainType::new((decoded >> 56) as u8);
+    let chain_id = decoded & RailgunChain::MAX_CHAIN_ID;
+    let chain = RailgunChain::new(chain_type, chain_id)
+        .map_err(|_| ParseDomainError::new("railgun address contains an invalid network id"))?;
+    Ok(ChainScope::Chain(chain))
+}
+
+fn validate_railgun_address(value: &str) -> Result<(), ParseDomainError> {
+    if value != value.to_ascii_lowercase() {
+        return Err(ParseDomainError::new("railgun address must use canonical lowercase encoding"));
+    }
+    if value.len() > ADDRESS_MAX_LENGTH {
+        return Err(ParseDomainError::new("railgun address exceeds the maximum encoded length"));
+    }
+
+    let hrp = Hrp::parse(ADDRESS_HRP)
+        .map_err(|_| ParseDomainError::new("railgun address must use the 0zk prefix"))?;
+    let checked = CheckedHrpstring::new::<Bech32m>(value)
+        .map_err(|_| ParseDomainError::new("railgun address must be valid bech32m"))?;
+    if checked.hrp() != hrp {
+        return Err(ParseDomainError::new("railgun address must use the 0zk prefix"));
+    }
+
+    let payload: Vec<u8> = checked.byte_iter().collect();
+    if payload.len() != ADDRESS_PAYLOAD_LENGTH {
+        return Err(ParseDomainError::new(
+            "railgun address payload must match the canonical fixed length",
+        ));
+    }
+    if payload[0] != ADDRESS_VERSION_V1 {
+        return Err(ParseDomainError::new("railgun address version is unsupported"));
+    }
+
+    let master_public_key = BigUint::from_bytes_be(&payload[1..33]);
+    MasterPublicKey::new(master_public_key)
+        .map_err(|_| ParseDomainError::new("master public key must fit within 32 bytes"))?;
+    let network_id = NetworkId::from_slice(&payload[33..41]).map_err(|_| {
+        ParseDomainError::new("railgun address payload must match the canonical fixed length")
+    })?;
+    decode_chain_scope(network_id)?;
+    ViewingPublicKey::from_slice(&payload[41..]).map_err(|_| {
+        ParseDomainError::new("railgun address payload must match the canonical fixed length")
+    })?;
+    Ok(())
+}
 
 /// Error returned when a domain value fails validation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -68,9 +167,27 @@ pub struct SpendingPublicKey {
 
 impl SpendingPublicKey {
     /// Creates a spending public key from `BabyJubJub` coordinates.
-    #[must_use]
-    pub fn new(x: BigUint, y: BigUint) -> Self {
-        Self { x, y }
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either coordinate is outside the BabyJubJub field or
+    /// if the coordinates do not represent a valid compressible BabyJubJub point.
+    pub fn new(x: BigUint, y: BigUint) -> Result<Self, ParseDomainError> {
+        let point =
+            Point { x: biguint_to_babyjubjub_field(&x)?, y: biguint_to_babyjubjub_field(&y)? };
+        let compressed = point.compress();
+        let decompressed = decompress_point(compressed).map_err(|_| {
+            ParseDomainError::new(
+                "spending public key coordinates must form a valid BabyJubJub point",
+            )
+        })?;
+        if decompressed.x == point.x && decompressed.y == point.y {
+            Ok(Self { x, y })
+        } else {
+            Err(ParseDomainError::new(
+                "spending public key coordinates must form a valid BabyJubJub point",
+            ))
+        }
     }
 
     /// Returns the x coordinate.
@@ -212,9 +329,13 @@ pub struct NullifyingKey(BigUint);
 
 impl NullifyingKey {
     /// Creates a nullifying key from a field-element integer value.
-    #[must_use]
-    pub const fn new(value: BigUint) -> Self {
-        Self(value)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `value` is not a valid BN254 scalar field element.
+    pub fn new(value: BigUint) -> Result<Self, ParseDomainError> {
+        validate_bn254_scalar(&value, "nullifying key must fit within the BN254 scalar field")?;
+        Ok(Self(value))
     }
 
     /// Returns the underlying field-element integer value.
@@ -230,9 +351,21 @@ pub struct MasterPublicKey(BigUint);
 
 impl MasterPublicKey {
     /// Creates a master public key from a field-element integer value.
-    #[must_use]
-    pub const fn new(value: BigUint) -> Self {
-        Self(value)
+    ///
+    /// This constructor validates the canonical 32-byte encoding boundary rather
+    /// than BN254 scalar-field membership. Existing canonical address vectors in
+    /// the RAILGUN ecosystem include master public key values that fit the fixed
+    /// 32-byte payload but are not constrained here to the BN254 modulus.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `value` does not fit within the canonical 32-byte
+    /// master-public-key encoding.
+    pub fn new(value: BigUint) -> Result<Self, ParseDomainError> {
+        if value.to_bytes_be().len() > 32 {
+            return Err(ParseDomainError::new("master public key must fit within 32 bytes"));
+        }
+        Ok(Self(value))
     }
 
     /// Returns the underlying field-element integer value.
@@ -407,16 +540,37 @@ pub enum ChainScope {
 pub struct RailgunAddress(String);
 
 impl RailgunAddress {
-    /// Creates a Railgun address from its encoded string form.
-    #[must_use]
-    pub fn new(value: String) -> Self {
-        Self(value)
+    /// Parses and validates a canonical Railgun address.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is not canonical lowercase bech32m `0zk`
+    /// data with a supported version and valid payload semantics.
+    pub fn parse(value: &str) -> Result<Self, ParseDomainError> {
+        validate_railgun_address(value)?;
+        Ok(Self(value.to_owned()))
     }
 
     /// Returns the encoded address string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl TryFrom<&str> for RailgunAddress {
+    type Error = ParseDomainError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::parse(value)
+    }
+}
+
+impl TryFrom<String> for RailgunAddress {
+    type Error = ParseDomainError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
     }
 }
 
@@ -547,7 +701,12 @@ impl TxHash {
 
 #[cfg(test)]
 mod tests {
-    use super::{ParseDomainError, SpendingPrivateKey, ViewingPrivateKey, ViewingPublicKey};
+    use num_bigint::BigUint;
+
+    use super::{
+        MasterPublicKey, NullifyingKey, ParseDomainError, RailgunAddress, SpendingPrivateKey,
+        SpendingPublicKey, ViewingPrivateKey, ViewingPublicKey,
+    };
 
     #[test]
     fn rejects_invalid_spending_private_key_length() {
@@ -571,5 +730,62 @@ mod tests {
             panic!("invalid viewing public key length should fail");
         };
         assert_eq!(error, ParseDomainError::new("viewing public key must be exactly 32 bytes"));
+    }
+
+    #[test]
+    fn rejects_invalid_nullifying_key_field_element() {
+        let Err(error) = NullifyingKey::new(super::bn254_scalar_field_modulus()) else {
+            panic!("invalid nullifying key should fail");
+        };
+        assert_eq!(
+            error,
+            ParseDomainError::new("nullifying key must fit within the BN254 scalar field")
+        );
+    }
+
+    #[test]
+    fn rejects_master_public_key_larger_than_32_bytes() {
+        let Err(error) = MasterPublicKey::new(BigUint::from_bytes_be(&[1_u8; 33])) else {
+            panic!("oversized master public key should fail");
+        };
+        assert_eq!(error, ParseDomainError::new("master public key must fit within 32 bytes"));
+    }
+
+    #[test]
+    fn rejects_invalid_spending_public_key_point() {
+        let Err(error) = SpendingPublicKey::new(BigUint::from(1_u8), BigUint::from(1_u8)) else {
+            panic!("invalid spending public key should fail");
+        };
+        assert_eq!(
+            error,
+            ParseDomainError::new(
+                "spending public key coordinates must form a valid BabyJubJub point"
+            )
+        );
+    }
+
+    #[test]
+    fn parses_valid_railgun_address() {
+        let Ok(address) = RailgunAddress::parse(
+            "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca",
+        ) else {
+            panic!("canonical address should parse");
+        };
+
+        assert!(address.as_str().starts_with("0zk1"));
+    }
+
+    #[test]
+    fn rejects_noncanonical_railgun_address() {
+        let Err(error) = RailgunAddress::parse(
+            "RGANY1PNJ7U66VWQHCQUXGMH4PEWUTPA4Y55VTWLAG60UMDPSHKEJ92RN47EY76GES3T3ENN",
+        ) else {
+            panic!("invalid address should fail");
+        };
+
+        assert_eq!(
+            error,
+            ParseDomainError::new("railgun address must use canonical lowercase encoding")
+        );
     }
 }

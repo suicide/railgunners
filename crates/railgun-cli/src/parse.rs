@@ -56,7 +56,8 @@ pub(crate) fn parse_master_public_key(
     json: bool,
 ) -> Result<MasterPublicKey, CliError> {
     let bytes = parse_hex::<32>(value, "master public key", json)?;
-    Ok(MasterPublicKey::new(BigUint::from_bytes_be(&bytes)))
+    MasterPublicKey::new(BigUint::from_bytes_be(&bytes))
+        .map_err(|error| CliError::command(error.to_string(), json))
 }
 
 pub(crate) fn parse_decimal_biguint(

@@ -141,7 +141,8 @@ pub fn unpack_spending_public_key(
     let point = decompress_point(*packed_spending_public_key.as_bytes())
         .map_err(|_| ShareableViewingKeyError::InvalidPackedSpendingPublicKey)?;
 
-    Ok(SpendingPublicKey::new(parse_coordinate(&point.x)?, parse_coordinate(&point.y)?))
+    SpendingPublicKey::new(parse_coordinate(&point.x)?, parse_coordinate(&point.y)?)
+        .map_err(|_| ShareableViewingKeyError::InvalidPackedSpendingPublicKey)
 }
 
 /// Encodes a shareable viewing key payload as lowercase hexadecimal `MessagePack`.

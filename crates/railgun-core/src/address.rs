@@ -168,7 +168,7 @@ pub fn encode_railgun_address(
         return Err(AddressEncodingError::EncodedLengthExceeded(address.len()));
     }
 
-    Ok(RailgunAddress::new(address))
+    RailgunAddress::parse(&address).map_err(|_| AddressEncodingError::InvalidBech32mEncoding)
 }
 
 /// Decodes and validates a canonical `0zk` Railgun address.
@@ -204,7 +204,8 @@ pub fn decode_railgun_address(address: &str) -> Result<RailgunAddressData, Addre
 
     let master_public_key = MasterPublicKey::new(BigUint::from_bytes_be(
         &payload[MASTER_PUBLIC_KEY_OFFSET..NETWORK_ID_OFFSET],
-    ));
+    ))
+    .map_err(|_| AddressDecodingError::InvalidPayloadLength(payload.len()))?;
     let network_id = NetworkId::from_slice(&payload[NETWORK_ID_OFFSET..VIEWING_PUBLIC_KEY_OFFSET])
         .map_err(|_| AddressDecodingError::InvalidPayloadLength(payload.len()))?;
     let chain_scope = decode_network_id(network_id)?;
@@ -233,7 +234,8 @@ mod tests {
 
     #[test]
     fn encodes_address_vector_one() {
-        let master_public_key = MasterPublicKey::new(padded_hex_biguint("00000000"));
+        let master_public_key = MasterPublicKey::new(padded_hex_biguint("00000000"))
+            .unwrap_or_else(|_| panic!("test master public key should validate"));
         let viewing_public_key = ViewingPublicKey::new(padded_hex_array::<32>("00000000"));
         let chain = RailgunChain::new(ChainType::new(0), 1)
             .unwrap_or_else(|_| panic!("test chain should be valid"));
@@ -272,7 +274,8 @@ mod tests {
     fn encodes_address_vector_two() {
         let master_public_key = MasterPublicKey::new(padded_hex_biguint(
             "01bfd5681c0479be9a8ef8dd8baadd97115899a9af30b3d2455843afb41b",
-        ));
+        ))
+        .unwrap_or_else(|_| panic!("test master public key should validate"));
         let viewing_public_key = ViewingPublicKey::new(padded_hex_array::<32>(
             "01bfd5681c0479be9a8ef8dd8baadd97115899a9af30b3d2455843afb41b",
         ));
@@ -317,7 +320,8 @@ mod tests {
     fn encodes_address_vector_three() {
         let master_public_key = MasterPublicKey::new(padded_hex_biguint(
             "ee6b4c702f8070c8ddea1cbb8b0f6a4a518b77fa8d3f9b68617b664550e75f64",
-        ));
+        ))
+        .unwrap_or_else(|_| panic!("test master public key should validate"));
         let viewing_public_key = ViewingPublicKey::new(padded_hex_array::<32>(
             "ee6b4c702f8070c8ddea1cbb8b0f6a4a518b77fa8d3f9b68617b664550e75f64",
         ));
@@ -356,7 +360,8 @@ mod tests {
 
     #[test]
     fn round_trips_chain_scoped_address() {
-        let master_public_key = MasterPublicKey::new(padded_hex_biguint("1234"));
+        let master_public_key = MasterPublicKey::new(padded_hex_biguint("1234"))
+            .unwrap_or_else(|_| panic!("test master public key should validate"));
         let viewing_public_key = ViewingPublicKey::new(padded_hex_array::<32>("5678"));
         let chain = RailgunChain::new(ChainType::new(2), 137)
             .unwrap_or_else(|_| panic!("test chain should be valid"));
@@ -379,7 +384,8 @@ mod tests {
 
     #[test]
     fn round_trips_all_chains_address() {
-        let master_public_key = MasterPublicKey::new(padded_hex_biguint("abcd"));
+        let master_public_key = MasterPublicKey::new(padded_hex_biguint("abcd"))
+            .unwrap_or_else(|_| panic!("test master public key should validate"));
         let viewing_public_key = ViewingPublicKey::new(padded_hex_array::<32>("dcba"));
 
         let address = encode_railgun_address(
@@ -477,7 +483,8 @@ mod tests {
     fn rejects_uppercase_address_as_noncanonical() {
         let address = encode_railgun_address(
             1,
-            &MasterPublicKey::new(BigUint::from(0_u8)),
+            &MasterPublicKey::new(BigUint::from(0_u8))
+                .unwrap_or_else(|_| panic!("zero master public key should validate")),
             ChainScope::AllChains,
             &ViewingPublicKey::new([0_u8; 32]),
         )
@@ -495,7 +502,8 @@ mod tests {
         let error = expect_err(
             encode_railgun_address(
                 2,
-                &MasterPublicKey::new(BigUint::from(0_u8)),
+                &MasterPublicKey::new(BigUint::from(0_u8))
+                    .unwrap_or_else(|_| panic!("zero master public key should validate")),
                 ChainScope::AllChains,
                 &ViewingPublicKey::new([0_u8; 32]),
             ),
@@ -517,21 +525,6 @@ mod tests {
         );
 
         assert_eq!(error, AddressDecodingError::UnsupportedVersion(2));
-    }
-
-    #[test]
-    fn rejects_master_public_key_longer_than_32_bytes() {
-        let error = expect_err(
-            encode_railgun_address(
-                1,
-                &MasterPublicKey::new(BigUint::from_bytes_be(&[1_u8; 33])),
-                ChainScope::AllChains,
-                &ViewingPublicKey::new([0_u8; 32]),
-            ),
-            "oversized master public key should fail",
-        );
-
-        assert_eq!(error, AddressEncodingError::InvalidMasterPublicKey);
     }
 
     #[test]

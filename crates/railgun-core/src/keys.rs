@@ -64,7 +64,7 @@ pub fn derive_spending_public_key(
     let public_key = private_key.public();
     let x = parse_coordinate(&public_key.x)?;
     let y = parse_coordinate(&public_key.y)?;
-    Ok(SpendingPublicKey::new(x, y))
+    SpendingPublicKey::new(x, y).map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
 /// Derives a spending public key from raw private-key bytes.
@@ -139,7 +139,8 @@ pub fn derive_nullifying_key(
     let hash = poseidon.hash(&[input]).map_err(|_| KeyDerivationError::DerivationFailure)?;
     let bytes = hash.into_bigint().to_bytes_be();
 
-    Ok(NullifyingKey::new(BigUint::from_bytes_be(&bytes)))
+    NullifyingKey::new(BigUint::from_bytes_be(&bytes))
+        .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
 /// Derives a nullifying key from raw viewing-private-key bytes.
@@ -179,7 +180,8 @@ pub fn derive_master_public_key(
         Poseidon::<Fr>::new_circom(3).map_err(|_| KeyDerivationError::DerivationFailure)?;
     let hash = poseidon.hash(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
 
-    Ok(MasterPublicKey::new(BigUint::from_bytes_be(&hash.into_bigint().to_bytes_be())))
+    MasterPublicKey::new(BigUint::from_bytes_be(&hash.into_bigint().to_bytes_be()))
+        .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
 #[cfg(test)]
@@ -312,10 +314,12 @@ mod tests {
             parse_decimal(
                 "11878614856120328179849762231924033298788609151532558727282528569229552954628",
             ),
-        );
+        )
+        .unwrap_or_else(|_| panic!("issue vector spending public key should validate"));
         let nullifying_key = NullifyingKey::new(parse_decimal(
             "8368299126798249740586535953124199418524409103803955764525436743456763691384",
-        ));
+        ))
+        .unwrap_or_else(|_| panic!("issue vector nullifying key should validate"));
         let master_public_key = derive_master_public_key(&spending_public_key, &nullifying_key)
             .unwrap_or_else(|_| panic!("master public key derivation should succeed"));
 
@@ -326,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn master_public_key_depends_on_input_ordering() {
+    fn master_public_key_depends_on_input_material() {
         let spending_public_key = SpendingPublicKey::new(
             parse_decimal(
                 "15684838006997671713939066069845237677934334329285343229142447933587909549584",
@@ -334,24 +338,26 @@ mod tests {
             parse_decimal(
                 "11878614856120328179849762231924033298788609151532558727282528569229552954628",
             ),
-        );
+        )
+        .unwrap_or_else(|_| panic!("issue vector spending public key should validate"));
         let canonical_nullifying_key = NullifyingKey::new(parse_decimal(
             "8368299126798249740586535953124199418524409103803955764525436743456763691384",
-        ));
+        ))
+        .unwrap_or_else(|_| panic!("issue vector nullifying key should validate"));
         let canonical = derive_master_public_key(&spending_public_key, &canonical_nullifying_key)
             .unwrap_or_else(|_| panic!("canonical master public key derivation should succeed"));
 
-        let reordered_spending_public_key = SpendingPublicKey::new(
-            spending_public_key.y().clone(),
-            spending_public_key.x().clone(),
-        );
-        let reordered =
-            derive_master_public_key(&reordered_spending_public_key, &canonical_nullifying_key)
+        let alternate_spending_public_key = derive_spending_public_key(&SpendingPrivateKey::new(
+            hex_array::<32>("67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef"),
+        ))
+        .unwrap_or_else(|_| panic!("alternate spending public key should derive"));
+        let alternate =
+            derive_master_public_key(&alternate_spending_public_key, &canonical_nullifying_key)
                 .unwrap_or_else(|_| {
-                    panic!("reordered master public key derivation should succeed")
+                    panic!("alternate master public key derivation should succeed")
                 });
 
-        assert_ne!(canonical, reordered);
+        assert_ne!(canonical, alternate);
     }
 
     #[test]
