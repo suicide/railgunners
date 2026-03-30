@@ -13,6 +13,9 @@ pub(crate) enum Command {
     Version,
     /// Describe the current scaffold.
     ScaffoldInfo,
+    /// Encode, decode, and validate 0zk addresses.
+    #[command(subcommand)]
+    Address(AddressCommand),
     /// Run mnemonic-related offline workflows.
     #[command(subcommand)]
     Mnemonic(MnemonicCommand),
@@ -22,6 +25,49 @@ pub(crate) enum Command {
     /// Create and inspect shareable viewing keys.
     #[command(subcommand)]
     ViewingKey(ViewingKeyCommand),
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum AddressCommand {
+    /// Encode a canonical 0zk address.
+    Encode {
+        /// Address version. Defaults to 1.
+        #[arg(long, default_value_t = 1)]
+        version: u8,
+        /// The 32-byte master public key in hex.
+        #[arg(long = "master-public-key")]
+        master_public_key: String,
+        /// Optional chain type override. Defaults to all-chains.
+        #[arg(long = "chain-type")]
+        chain_type: Option<u8>,
+        /// Optional chain id override. Defaults to all-chains.
+        #[arg(long = "chain-id")]
+        chain_id: Option<u64>,
+        /// The 32-byte viewing public key in hex.
+        #[arg(long = "viewing-public-key")]
+        viewing_public_key: String,
+        /// Emit stable machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Decode a canonical 0zk address.
+    Decode {
+        /// The encoded 0zk address.
+        #[arg(long)]
+        address: String,
+        /// Emit stable machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Validate a canonical 0zk address.
+    Validate {
+        /// The encoded 0zk address.
+        #[arg(long)]
+        address: String,
+        /// Emit stable machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

@@ -1,7 +1,7 @@
 use num_bigint::BigUint;
 use railgun_types::{
-    ChainScope, ChainType, PackedSpendingPublicKey, RailgunChain, SpendingPrivateKey,
-    ViewingPrivateKey,
+    ChainScope, ChainType, MasterPublicKey, PackedSpendingPublicKey, RailgunChain,
+    SpendingPrivateKey, ViewingPrivateKey, ViewingPublicKey,
 };
 
 use crate::error::CliError;
@@ -41,6 +41,22 @@ pub(crate) fn parse_packed_spending_public_key(
 ) -> Result<PackedSpendingPublicKey, CliError> {
     let bytes = parse_hex::<32>(value, "packed spending public key", json)?;
     Ok(PackedSpendingPublicKey::new(bytes))
+}
+
+pub(crate) fn parse_viewing_public_key(
+    value: &str,
+    json: bool,
+) -> Result<ViewingPublicKey, CliError> {
+    let bytes = parse_hex::<32>(value, "viewing public key", json)?;
+    Ok(ViewingPublicKey::new(bytes))
+}
+
+pub(crate) fn parse_master_public_key(
+    value: &str,
+    json: bool,
+) -> Result<MasterPublicKey, CliError> {
+    let bytes = parse_hex::<32>(value, "master public key", json)?;
+    Ok(MasterPublicKey::new(BigUint::from_bytes_be(&bytes)))
 }
 
 pub(crate) fn parse_decimal_biguint(

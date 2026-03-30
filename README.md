@@ -66,6 +66,22 @@ nix build .#default
 
 The workspace includes a small offline-first CLI in `crates/railgun-cli`.
 
+Current address commands:
+
+```sh
+railguncli address encode --master-public-key "0000000000000000000000000000000000000000000000000000000000000000" --chain-type 0 --chain-id 1 --viewing-public-key "0000000000000000000000000000000000000000000000000000000000000000" --json
+railguncli address decode --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
+railguncli address validate --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
+```
+
+Notes:
+
+- `address encode` defaults `--version` to `1`
+- `address encode` defaults to the all-chains scope when no chain override is provided
+- pass both `--chain-type` and `--chain-id` to encode a chain-scoped address
+- `address decode` returns semantic `chainScope` plus raw `networkID`
+- `address validate` exits non-zero for malformed input and returns stable JSON in `--json` mode
+
 Current mnemonic commands:
 
 ```sh

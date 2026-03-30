@@ -77,6 +77,7 @@ fn execute(cli: Cli, stdout: &mut dyn Write) -> Result<(), CliError> {
                 "The CLI is intentionally thin and will grow through public SDK APIs."
             )?;
         }
+        Command::Address(command) => commands::address::execute(command, stdout)?,
         Command::Mnemonic(command) => commands::mnemonic::execute(command, stdout)?,
         Command::Keys(command) => commands::keys::execute(command, stdout)?,
         Command::ViewingKey(command) => commands::viewing_key::execute(command, stdout)?,
