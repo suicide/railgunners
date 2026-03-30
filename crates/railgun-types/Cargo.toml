@@ -11,7 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-babyjubjub-rs = "0.0.11"
-bech32 = "0.11.1"
-ff = { package = "ff_ce", version = "0.11" }
-num-bigint = "0.4.6"
+babyjubjub-rs.workspace = true
+bech32.workspace = true
+ff.workspace = true
+num-bigint.workspace = true
