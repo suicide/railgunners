@@ -6,6 +6,7 @@ pub mod hd;
 pub mod keys;
 pub mod network_id;
 pub mod shareable_viewing_key;
+pub mod token;
 
 use railgun_types::{Address, ChainId, TxHash};
 
@@ -28,6 +29,7 @@ pub use shareable_viewing_key::{
     ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
     pack_spending_public_key, unpack_spending_public_key,
 };
+pub use token::{CanonicalTokenData, derive_token_hash, encode_token_data};
 
 /// Result alias used across foundational crates.
 pub type Result<T, E = RailgunError> = core::result::Result<T, E>;
