@@ -2,7 +2,7 @@
 
 use num_bigint::BigUint;
 use railgun_types::{Address, TokenData, TokenHash, TokenType};
-use tiny_keccak::{Hasher, Keccak};
+use sha3::{Digest, Keccak256};
 
 const PADDED_TOKEN_FIELD_LENGTH: usize = 32;
 const BN254_SCALAR_FIELD_MODULUS_BYTES: [u8; 32] = [
@@ -80,12 +80,11 @@ pub fn derive_token_hash(token_data: &TokenData) -> TokenHash {
     match encoded.token_type() {
         TokenType::ERC20 => TokenHash::new(*encoded.token_address()),
         TokenType::ERC721 | TokenType::ERC1155 => {
-            let mut keccak = Keccak::v256();
-            let mut digest = [0_u8; PADDED_TOKEN_FIELD_LENGTH];
-            keccak.update(&token_type_bytes(encoded.token_type()));
-            keccak.update(encoded.token_address());
-            keccak.update(encoded.token_sub_id());
-            keccak.finalize(&mut digest);
+            let digest = Keccak256::new()
+                .chain_update(token_type_bytes(encoded.token_type()))
+                .chain_update(encoded.token_address())
+                .chain_update(encoded.token_sub_id())
+                .finalize();
             let reduced = BigUint::from_bytes_be(&digest) % bn254_scalar_field_modulus();
             TokenHash::new(biguint_to_32_bytes(&reduced))
         }
