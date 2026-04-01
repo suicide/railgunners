@@ -1,18 +1,10 @@
 //! Canonical token data encoding and token hash derivation.
 
 use num_bigint::BigUint;
-use railgun_types::{Address, TokenData, TokenHash, TokenType};
+use railgun_types::{Address, TokenData, TokenHash, TokenType, bn254_scalar_field_modulus};
 use sha3::{Digest, Keccak256};
 
 const PADDED_TOKEN_FIELD_LENGTH: usize = 32;
-const BN254_SCALAR_FIELD_MODULUS_BYTES: [u8; 32] = [
-    0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
-    0x97, 0x81, 0x6a, 0x91, 0x68, 0x71, 0xca, 0x8d, 0x3c, 0x20, 0x8c, 0x16, 0xd8, 0x7c, 0xfd, 0x47,
-];
-
-fn bn254_scalar_field_modulus() -> BigUint {
-    BigUint::from_bytes_be(&BN254_SCALAR_FIELD_MODULUS_BYTES)
-}
 
 fn padded_token_address(address: Address) -> [u8; PADDED_TOKEN_FIELD_LENGTH] {
     let mut padded = [0_u8; PADDED_TOKEN_FIELD_LENGTH];

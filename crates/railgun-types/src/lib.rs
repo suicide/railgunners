@@ -8,9 +8,15 @@ use bech32::{Bech32m, Hrp};
 use ff::{PrimeField as _, PrimeFieldRepr as _};
 use num_bigint::BigUint;
 
-const BN254_SCALAR_FIELD_MODULUS_BYTES: [u8; 32] = [
+/// Canonical BN254 scalar-field modulus encoded as 32 big-endian bytes.
+///
+/// This is the same field boundary the upstream RAILGUN codebase refers to as
+/// `SNARK_PRIME`.
+/// Decimal:
+/// `21888242871839275222246405745257275088548364400416034343698204186575808495617`
+pub const BN254_SCALAR_FIELD_MODULUS_BYTES: [u8; 32] = [
     0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
-    0x97, 0x81, 0x6a, 0x91, 0x68, 0x71, 0xca, 0x8d, 0x3c, 0x20, 0x8c, 0x16, 0xd8, 0x7c, 0xfd, 0x47,
+    0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91, 0x43, 0xe1, 0xf5, 0x93, 0xf0, 0x00, 0x00, 0x01,
 ];
 const ADDRESS_HRP: &str = "0zk";
 const ADDRESS_MAX_LENGTH: usize = 127;
@@ -18,7 +24,9 @@ const ADDRESS_VERSION_V1: u8 = 1;
 const ADDRESS_PAYLOAD_LENGTH: usize = 73;
 const NETWORK_ID_XOR_KEY: [u8; 8] = *b"railgun\0";
 
-fn bn254_scalar_field_modulus() -> BigUint {
+/// Returns the canonical BN254 scalar-field modulus as a `BigUint`.
+#[must_use]
+pub fn bn254_scalar_field_modulus() -> BigUint {
     BigUint::from_bytes_be(&BN254_SCALAR_FIELD_MODULUS_BYTES)
 }
 
@@ -869,10 +877,13 @@ mod tests {
     use num_bigint::BigUint;
 
     use super::{
-        Address, MasterPublicKey, NullifyingKey, ParseDomainError, RailgunAddress,
-        SpendingPrivateKey, SpendingPublicKey, TokenData, TokenSubId, TokenType, ViewingPrivateKey,
-        ViewingPublicKey,
+        Address, BN254_SCALAR_FIELD_MODULUS_BYTES, MasterPublicKey, NullifyingKey,
+        ParseDomainError, RailgunAddress, SpendingPrivateKey, SpendingPublicKey, TokenData,
+        TokenSubId, TokenType, ViewingPrivateKey, ViewingPublicKey,
     };
+
+    const BN254_SCALAR_FIELD_MODULUS_DECIMAL: &str =
+        "21888242871839275222246405745257275088548364400416034343698204186575808495617";
 
     #[test]
     fn rejects_invalid_spending_private_key_length() {
@@ -907,6 +918,14 @@ mod tests {
             error,
             ParseDomainError::new("nullifying key must fit within the BN254 scalar field")
         );
+    }
+
+    #[test]
+    fn bn254_scalar_field_modulus_decimal_matches_bytes() {
+        let parsed = BigUint::parse_bytes(BN254_SCALAR_FIELD_MODULUS_DECIMAL.as_bytes(), 10)
+            .unwrap_or_else(|| panic!("bn254 scalar modulus decimal should parse"));
+
+        assert_eq!(parsed.to_bytes_be(), BN254_SCALAR_FIELD_MODULUS_BYTES);
     }
 
     #[test]
