@@ -383,6 +383,61 @@ impl MasterPublicKey {
     }
 }
 
+/// Typed 16-byte note random used in note public key derivation.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct NoteRandom([u8; 16]);
+
+impl NoteRandom {
+    /// Length of a note random in bytes.
+    pub const LENGTH: usize = 16;
+
+    /// Creates a note random from raw bytes.
+    #[must_use]
+    pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
+        Self(bytes)
+    }
+
+    /// Creates a note random from a byte slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `bytes` is not exactly 16 bytes long.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, ParseDomainError> {
+        let array: [u8; Self::LENGTH] = bytes
+            .try_into()
+            .map_err(|_| ParseDomainError::new("note random must be exactly 16 bytes"))?;
+        Ok(Self::new(array))
+    }
+
+    /// Returns the raw note-random bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+}
+
+/// Typed Railgun note public key derived from receiver identity and note randomness.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NotePublicKey(BigUint);
+
+impl NotePublicKey {
+    /// Creates a note public key from a field-element integer value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `value` is not a valid BN254 scalar field element.
+    pub fn new(value: BigUint) -> Result<Self, ParseDomainError> {
+        validate_bn254_scalar(&value, "note public key must fit within the BN254 scalar field")?;
+        Ok(Self(value))
+    }
+
+    /// Returns the underlying field-element integer value.
+    #[must_use]
+    pub const fn value(&self) -> &BigUint {
+        &self.0
+    }
+}
+
 /// Typed 32-byte packed `BabyJubJub` spending public key.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct PackedSpendingPublicKey([u8; 32]);
@@ -877,9 +932,9 @@ mod tests {
     use num_bigint::BigUint;
 
     use super::{
-        Address, BN254_SCALAR_FIELD_MODULUS_BYTES, MasterPublicKey, NullifyingKey,
-        ParseDomainError, RailgunAddress, SpendingPrivateKey, SpendingPublicKey, TokenData,
-        TokenSubId, TokenType, ViewingPrivateKey, ViewingPublicKey,
+        Address, BN254_SCALAR_FIELD_MODULUS_BYTES, MasterPublicKey, NotePublicKey, NoteRandom,
+        NullifyingKey, ParseDomainError, RailgunAddress, SpendingPrivateKey, SpendingPublicKey,
+        TokenData, TokenSubId, TokenType, ViewingPrivateKey, ViewingPublicKey,
     };
 
     const BN254_SCALAR_FIELD_MODULUS_DECIMAL: &str =
@@ -910,6 +965,14 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_note_random_length() {
+        let Err(error) = NoteRandom::from_slice(&[7_u8; 15]) else {
+            panic!("invalid note random length should fail");
+        };
+        assert_eq!(error, ParseDomainError::new("note random must be exactly 16 bytes"));
+    }
+
+    #[test]
     fn rejects_invalid_nullifying_key_field_element() {
         let Err(error) = NullifyingKey::new(super::bn254_scalar_field_modulus()) else {
             panic!("invalid nullifying key should fail");
@@ -926,6 +989,17 @@ mod tests {
             .unwrap_or_else(|| panic!("bn254 scalar modulus decimal should parse"));
 
         assert_eq!(parsed.to_bytes_be(), BN254_SCALAR_FIELD_MODULUS_BYTES);
+    }
+
+    #[test]
+    fn rejects_invalid_note_public_key_field_element() {
+        let Err(error) = NotePublicKey::new(super::bn254_scalar_field_modulus()) else {
+            panic!("invalid note public key should fail");
+        };
+        assert_eq!(
+            error,
+            ParseDomainError::new("note public key must fit within the BN254 scalar field")
+        );
     }
 
     #[test]

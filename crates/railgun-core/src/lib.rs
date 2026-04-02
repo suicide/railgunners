@@ -5,6 +5,7 @@ pub mod bip39;
 pub mod hd;
 pub mod keys;
 pub mod network_id;
+pub mod note;
 pub mod shareable_viewing_key;
 pub mod token;
 
@@ -25,6 +26,7 @@ pub use keys::{
     spending_private_key_from_node, viewing_private_key_from_node,
 };
 pub use network_id::{NetworkIdError, decode_network_id, encode_network_id};
+pub use note::derive_note_public_key;
 pub use shareable_viewing_key::{
     ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
     pack_spending_public_key, unpack_spending_public_key,
