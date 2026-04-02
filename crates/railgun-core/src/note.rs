@@ -1,10 +1,12 @@
-//! Canonical note public key derivation.
+//! Canonical note public key and commitment derivation.
 
 use ark_bn254::Fr;
 use ark_ff::{BigInteger, PrimeField};
 use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
-use railgun_types::{MasterPublicKey, NotePublicKey, NoteRandom};
+use railgun_types::{
+    MasterPublicKey, NoteCommitment, NotePublicKey, NoteRandom, NoteValue, TokenHash,
+};
 
 use crate::hd::KeyDerivationError;
 
@@ -41,13 +43,57 @@ pub fn derive_note_public_key(
         .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
+/// Derives the canonical UTXO tree leaf commitment from note inputs.
+///
+/// Poseidon input ordering is exactly `[note_public_key, token_hash, value]`
+/// over the BN254 scalar field.
+///
+/// # Errors
+///
+/// Returns an error if any input is not a valid BN254 field element or if
+/// Poseidon hashing fails unexpectedly.
+pub fn derive_note_commitment(
+    note_public_key: &NotePublicKey,
+    token_hash: &TokenHash,
+    value: NoteValue,
+) -> Result<NoteCommitment, KeyDerivationError> {
+    let inputs = [
+        biguint_to_bn254_field(note_public_key.value())?,
+        Fr::from_be_bytes_mod_order(token_hash.as_bytes()),
+        Fr::from(value.get()),
+    ];
+    let mut poseidon =
+        Poseidon::<Fr>::new_circom(3).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    let hash = poseidon.hash(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
+
+    NoteCommitment::new(BigUint::from_bytes_be(&hash.into_bigint().to_bytes_be()))
+        .map_err(|_| KeyDerivationError::DerivationFailure)
+}
+
 #[cfg(test)]
 mod tests {
     use num_bigint::BigUint;
-    use railgun_types::{MasterPublicKey, NoteRandom};
+    use railgun_types::{MasterPublicKey, NotePublicKey, NoteRandom, NoteValue, TokenHash};
 
-    use super::derive_note_public_key;
+    use super::{derive_note_commitment, derive_note_public_key};
     use crate::hd::KeyDerivationError;
+
+    fn decode_hex<const N: usize>(value: &str) -> [u8; N] {
+        let trimmed = value.strip_prefix("0x").unwrap_or(value);
+        assert_eq!(trimmed.len(), N * 2, "hex input has unexpected length");
+
+        let mut bytes = [0_u8; N];
+        for (index, chunk) in trimmed.as_bytes().chunks_exact(2).enumerate() {
+            let high = (chunk[0] as char)
+                .to_digit(16)
+                .unwrap_or_else(|| panic!("invalid hex nibble at index {}", index * 2));
+            let low = (chunk[1] as char)
+                .to_digit(16)
+                .unwrap_or_else(|| panic!("invalid hex nibble at index {}", index * 2 + 1));
+            bytes[index] = ((high << 4) | low) as u8;
+        }
+        bytes
+    }
 
     #[test]
     fn derives_note_public_key_from_issue_vector() {
@@ -79,6 +125,58 @@ mod tests {
     }
 
     #[test]
+    fn derives_note_commitment_from_hex_vector() {
+        let note_public_key = NotePublicKey::new(BigUint::from_bytes_be(&decode_hex::<32>(
+            "23da85e72baa8d77f476a893de0964ce1ec2957d056b591a19d05bb4b9a549ed",
+        )))
+        .unwrap_or_else(|error| panic!("note public key should validate: {error}"));
+        let token_hash = TokenHash::from_slice(&decode_hex::<32>(
+            "0000000000000000000000007f4925cdf66ddf5b88016df1fe915e68eff8f192",
+        ))
+        .unwrap_or_else(|error| panic!("token hash should validate: {error}"));
+        let value = NoteValue::from_be_bytes(decode_hex::<16>("0000000000000000086aa1ade61ccb53"));
+
+        let commitment = derive_note_commitment(&note_public_key, &token_hash, value)
+            .unwrap_or_else(|error| panic!("note commitment should derive: {error}"));
+
+        assert_eq!(
+            commitment.value(),
+            &BigUint::from_bytes_be(&decode_hex::<32>(
+                "29decce78b2f43c718ebb7c6825617ea6881836d88d9551dd2530c44f0d790c5",
+            ))
+        );
+    }
+
+    #[test]
+    fn derives_note_commitment_from_decimal_vector() {
+        let note_public_key = NotePublicKey::new(
+            BigUint::parse_bytes(
+                b"6401386539363233023821237080626891507664131047949709897410333742190241828916",
+                10,
+            )
+            .unwrap_or_else(|| panic!("note public key should parse")),
+        )
+        .unwrap_or_else(|error| panic!("note public key should validate: {error}"));
+        let token_hash = TokenHash::from_slice(&decode_hex::<32>(
+            "0000000000000000000000009fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        ))
+        .unwrap_or_else(|error| panic!("token hash should validate: {error}"));
+        let value = NoteValue::new(109_725_000_000_000_000_000_000_u128);
+
+        let commitment = derive_note_commitment(&note_public_key, &token_hash, value)
+            .unwrap_or_else(|error| panic!("note commitment should derive: {error}"));
+
+        assert_eq!(
+            commitment.value(),
+            &BigUint::parse_bytes(
+                b"6442080113031815261226726790601252395803415545769290265212232865825296902085",
+                10,
+            )
+            .unwrap_or_else(|| panic!("commitment should parse"))
+        );
+    }
+
+    #[test]
     fn note_public_key_derivation_is_deterministic() {
         let master_public_key = MasterPublicKey::new(BigUint::from(42_u8))
             .unwrap_or_else(|error| panic!("master public key should validate: {error}"));
@@ -87,6 +185,22 @@ mod tests {
         let first = derive_note_public_key(&master_public_key, &random)
             .unwrap_or_else(|error| panic!("first derivation should succeed: {error}"));
         let second = derive_note_public_key(&master_public_key, &random)
+            .unwrap_or_else(|error| panic!("second derivation should succeed: {error}"));
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn note_commitment_derivation_is_deterministic() {
+        let note_public_key = NotePublicKey::new(BigUint::from(42_u8))
+            .unwrap_or_else(|error| panic!("note public key should validate: {error}"));
+        let token_hash = TokenHash::from_slice(&[3_u8; TokenHash::LENGTH])
+            .unwrap_or_else(|error| panic!("token hash should validate: {error}"));
+        let value = NoteValue::new(9_u128);
+
+        let first = derive_note_commitment(&note_public_key, &token_hash, value)
+            .unwrap_or_else(|error| panic!("first derivation should succeed: {error}"));
+        let second = derive_note_commitment(&note_public_key, &token_hash, value)
             .unwrap_or_else(|error| panic!("second derivation should succeed: {error}"));
 
         assert_eq!(first, second);
@@ -107,6 +221,37 @@ mod tests {
         let swapped_random = NoteRandom::new([0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 42]);
         let swapped = derive_note_public_key(&swapped_master_public_key, &swapped_random)
             .unwrap_or_else(|error| panic!("swapped derivation should succeed: {error}"));
+
+        assert_ne!(ordered, swapped);
+    }
+
+    #[test]
+    fn note_commitment_derivation_depends_on_input_ordering() {
+        let note_public_key = NotePublicKey::new(BigUint::from(42_u8))
+            .unwrap_or_else(|error| panic!("note public key should validate: {error}"));
+        let token_hash = TokenHash::from_slice(&[3_u8; TokenHash::LENGTH])
+            .unwrap_or_else(|error| panic!("token hash should validate: {error}"));
+        let value = NoteValue::new(9_u128);
+
+        let ordered = derive_note_commitment(&note_public_key, &token_hash, value)
+            .unwrap_or_else(|error| panic!("ordered derivation should succeed: {error}"));
+        let swapped_note_public_key =
+            NotePublicKey::new(BigUint::from_bytes_be(token_hash.as_bytes()))
+                .unwrap_or_else(|error| panic!("swapped note public key should validate: {error}"));
+        let swapped_token_hash = TokenHash::from_slice(
+            &[0_u8; TokenHash::LENGTH - 1]
+                .iter()
+                .copied()
+                .chain(core::iter::once(42_u8))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|error| panic!("swapped token hash should validate: {error}"));
+        let swapped = derive_note_commitment(
+            &swapped_note_public_key,
+            &swapped_token_hash,
+            NoteValue::new(3_u128),
+        )
+        .unwrap_or_else(|error| panic!("swapped derivation should succeed: {error}"));
 
         assert_ne!(ordered, swapped);
     }
