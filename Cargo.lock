@@ -844,6 +844,7 @@ dependencies = [
  "babyjubjub-rs",
  "bech32",
  "bip39",
+ "curve25519-dalek",
  "ed25519-dalek",
  "ff_ce",
  "hmac",

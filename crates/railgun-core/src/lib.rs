@@ -7,6 +7,7 @@ pub mod keys;
 pub mod network_id;
 pub mod note;
 pub mod shareable_viewing_key;
+pub mod shared_key;
 pub mod token;
 
 use railgun_types::{Address, ChainId, TxHash};
@@ -33,6 +34,9 @@ pub use note::{
 pub use shareable_viewing_key::{
     ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
     pack_spending_public_key, unpack_spending_public_key,
+};
+pub use shared_key::{
+    SharedKeyError, derive_shared_symmetric_key, derive_shared_symmetric_key_from_bytes,
 };
 pub use token::{CanonicalTokenData, derive_token_hash, encode_token_data};
 

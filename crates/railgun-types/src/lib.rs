@@ -304,6 +304,72 @@ impl ViewingPublicKey {
     }
 }
 
+/// Typed 32-byte blinded ed25519 viewing public key used in note encryption.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct BlindedViewingPublicKey([u8; 32]);
+
+impl BlindedViewingPublicKey {
+    /// Length of a blinded viewing public key in bytes.
+    pub const LENGTH: usize = 32;
+
+    /// Creates a blinded viewing public key from raw bytes.
+    #[must_use]
+    pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
+        Self(bytes)
+    }
+
+    /// Creates a blinded viewing public key from a byte slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `bytes` is not exactly 32 bytes long.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, ParseDomainError> {
+        let array: [u8; Self::LENGTH] = bytes.try_into().map_err(|_| {
+            ParseDomainError::new("blinded viewing public key must be exactly 32 bytes")
+        })?;
+        Ok(Self::new(array))
+    }
+
+    /// Returns the raw blinded public-key bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+}
+
+/// Typed 32-byte shared symmetric key used for note encryption and decryption.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SharedSymmetricKey([u8; 32]);
+
+impl SharedSymmetricKey {
+    /// Length of a shared symmetric key in bytes.
+    pub const LENGTH: usize = 32;
+
+    /// Creates a shared symmetric key from raw bytes.
+    #[must_use]
+    pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
+        Self(bytes)
+    }
+
+    /// Creates a shared symmetric key from a byte slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `bytes` is not exactly 32 bytes long.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, ParseDomainError> {
+        let array: [u8; Self::LENGTH] = bytes
+            .try_into()
+            .map_err(|_| ParseDomainError::new("shared symmetric key must be exactly 32 bytes"))?;
+        Ok(Self::new(array))
+    }
+
+    /// Returns the raw shared-key bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+}
+
 /// Typed Railgun viewing keypair.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ViewingKeyPair {
@@ -1106,10 +1172,11 @@ mod tests {
     use num_bigint::BigUint;
 
     use super::{
-        Address, BN254_SCALAR_FIELD_MODULUS_BYTES, LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES,
-        MasterPublicKey, NotePublicKey, NoteRandom, NoteValue, Nullifier, NullifyingKey,
-        ParseDomainError, RailgunAddress, SenderRandom, SenderVisibility, SpendingPrivateKey,
-        SpendingPublicKey, TokenData, TokenSubId, TokenType, ViewingPrivateKey, ViewingPublicKey,
+        Address, BN254_SCALAR_FIELD_MODULUS_BYTES, BlindedViewingPublicKey, LeafIndex,
+        MEMO_SENDER_RANDOM_NULL_BYTES, MasterPublicKey, NotePublicKey, NoteRandom, NoteValue,
+        Nullifier, NullifyingKey, ParseDomainError, RailgunAddress, SenderRandom, SenderVisibility,
+        SharedSymmetricKey, SpendingPrivateKey, SpendingPublicKey, TokenData, TokenSubId,
+        TokenType, ViewingPrivateKey, ViewingPublicKey,
     };
 
     const BN254_SCALAR_FIELD_MODULUS_DECIMAL: &str =
@@ -1137,6 +1204,25 @@ mod tests {
             panic!("invalid viewing public key length should fail");
         };
         assert_eq!(error, ParseDomainError::new("viewing public key must be exactly 32 bytes"));
+    }
+
+    #[test]
+    fn rejects_invalid_blinded_viewing_public_key_length() {
+        let Err(error) = BlindedViewingPublicKey::from_slice(&[7_u8; 31]) else {
+            panic!("invalid blinded viewing public key length should fail");
+        };
+        assert_eq!(
+            error,
+            ParseDomainError::new("blinded viewing public key must be exactly 32 bytes")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_shared_symmetric_key_length() {
+        let Err(error) = SharedSymmetricKey::from_slice(&[7_u8; 31]) else {
+            panic!("invalid shared symmetric key length should fail");
+        };
+        assert_eq!(error, ParseDomainError::new("shared symmetric key must be exactly 32 bytes"));
     }
 
     #[test]
