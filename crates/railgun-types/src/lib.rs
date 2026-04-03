@@ -505,6 +505,46 @@ impl NoteCommitment {
     }
 }
 
+/// Typed non-negative UTXO leaf index used in nullifier derivation.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct LeafIndex(u64);
+
+impl LeafIndex {
+    /// Creates a leaf index from an explicit non-negative integer value.
+    #[must_use]
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Returns the inner integer value.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Typed Railgun nullifier derived from nullifying key and leaf index.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Nullifier(BigUint);
+
+impl Nullifier {
+    /// Creates a nullifier from a field-element integer value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `value` is not a valid BN254 scalar field element.
+    pub fn new(value: BigUint) -> Result<Self, ParseDomainError> {
+        validate_bn254_scalar(&value, "nullifier must fit within the BN254 scalar field")?;
+        Ok(Self(value))
+    }
+
+    /// Returns the underlying field-element integer value.
+    #[must_use]
+    pub const fn value(&self) -> &BigUint {
+        &self.0
+    }
+}
+
 /// Typed 32-byte packed `BabyJubJub` spending public key.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct PackedSpendingPublicKey([u8; 32]);
@@ -999,9 +1039,10 @@ mod tests {
     use num_bigint::BigUint;
 
     use super::{
-        Address, BN254_SCALAR_FIELD_MODULUS_BYTES, MasterPublicKey, NotePublicKey, NoteRandom,
-        NoteValue, NullifyingKey, ParseDomainError, RailgunAddress, SpendingPrivateKey,
-        SpendingPublicKey, TokenData, TokenSubId, TokenType, ViewingPrivateKey, ViewingPublicKey,
+        Address, BN254_SCALAR_FIELD_MODULUS_BYTES, LeafIndex, MasterPublicKey, NotePublicKey,
+        NoteRandom, NoteValue, Nullifier, NullifyingKey, ParseDomainError, RailgunAddress,
+        SpendingPrivateKey, SpendingPublicKey, TokenData, TokenSubId, TokenType, ViewingPrivateKey,
+        ViewingPublicKey,
     };
 
     const BN254_SCALAR_FIELD_MODULUS_DECIMAL: &str =
@@ -1078,6 +1119,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_nullifier_field_element() {
+        let Err(error) = Nullifier::new(super::bn254_scalar_field_modulus()) else {
+            panic!("invalid nullifier should fail");
+        };
+        assert_eq!(
+            error,
+            ParseDomainError::new("nullifier must fit within the BN254 scalar field")
+        );
+    }
+
+    #[test]
     fn note_value_round_trips_big_endian_bytes() {
         let value = NoteValue::from_be_bytes([
             0, 0, 0, 0, 0, 0, 0, 0, 8, 0x6a, 0xa1, 0xad, 0xe6, 0x1c, 0xcb, 0x53,
@@ -1087,6 +1139,13 @@ mod tests {
             value.to_be_bytes(),
             [0, 0, 0, 0, 0, 0, 0, 0, 8, 0x6a, 0xa1, 0xad, 0xe6, 0x1c, 0xcb, 0x53]
         );
+    }
+
+    #[test]
+    fn leaf_index_round_trips_value() {
+        let leaf_index = LeafIndex::new(6_500);
+
+        assert_eq!(leaf_index.get(), 6_500);
     }
 
     #[test]

@@ -1,11 +1,12 @@
-//! Canonical note public key and commitment derivation.
+//! Canonical note public key, commitment, and nullifier derivation.
 
 use ark_bn254::Fr;
 use ark_ff::{BigInteger, PrimeField};
 use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
 use railgun_types::{
-    MasterPublicKey, NoteCommitment, NotePublicKey, NoteRandom, NoteValue, TokenHash,
+    LeafIndex, MasterPublicKey, NoteCommitment, NotePublicKey, NoteRandom, NoteValue, Nullifier,
+    NullifyingKey, TokenHash,
 };
 
 use crate::hd::KeyDerivationError;
@@ -70,13 +71,37 @@ pub fn derive_note_commitment(
         .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
+/// Derives the canonical nullifier from a nullifying key and UTXO leaf index.
+///
+/// Poseidon input ordering is exactly `[nullifying_key, leaf_index]`
+/// over the BN254 scalar field.
+///
+/// # Errors
+///
+/// Returns an error if `nullifying_key` is not a valid BN254 field element or
+/// if Poseidon hashing fails unexpectedly.
+pub fn derive_nullifier(
+    nullifying_key: &NullifyingKey,
+    leaf_index: LeafIndex,
+) -> Result<Nullifier, KeyDerivationError> {
+    let inputs = [biguint_to_bn254_field(nullifying_key.value())?, Fr::from(leaf_index.get())];
+    let mut poseidon =
+        Poseidon::<Fr>::new_circom(2).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    let hash = poseidon.hash(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
+
+    Nullifier::new(BigUint::from_bytes_be(&hash.into_bigint().to_bytes_be()))
+        .map_err(|_| KeyDerivationError::DerivationFailure)
+}
+
 #[cfg(test)]
 mod tests {
     use num_bigint::BigUint;
-    use railgun_types::{MasterPublicKey, NotePublicKey, NoteRandom, NoteValue, TokenHash};
+    use railgun_types::{
+        LeafIndex, MasterPublicKey, NotePublicKey, NoteRandom, NoteValue, NullifyingKey, TokenHash,
+    };
 
-    use super::{derive_note_commitment, derive_note_public_key};
-    use crate::hd::KeyDerivationError;
+    use super::{derive_note_commitment, derive_note_public_key, derive_nullifier};
+    use crate::{derive_nullifying_key_from_bytes, hd::KeyDerivationError};
 
     fn decode_hex<const N: usize>(value: &str) -> [u8; N] {
         let trimmed = value.strip_prefix("0x").unwrap_or(value);
@@ -177,6 +202,60 @@ mod tests {
     }
 
     #[test]
+    fn derives_nullifier_from_vector_one() {
+        let nullifying_key = NullifyingKey::new(BigUint::from_bytes_be(&decode_hex::<32>(
+            "08ad9143ae793cdfe94b77e4e52bc4e9f13666966cffa395e3d412ea4e20480f",
+        )))
+        .unwrap_or_else(|error| panic!("nullifying key should validate: {error}"));
+
+        let nullifier = derive_nullifier(&nullifying_key, LeafIndex::new(0))
+            .unwrap_or_else(|error| panic!("nullifier should derive: {error}"));
+
+        assert_eq!(
+            nullifier.value(),
+            &BigUint::from_bytes_be(&decode_hex::<32>(
+                "03f68801f3ee2ed10178c162b4f7f1bd466bc9718f4f98175fc04934c5caba6e",
+            ))
+        );
+    }
+
+    #[test]
+    fn derives_nullifier_from_vector_two() {
+        let nullifying_key = NullifyingKey::new(BigUint::from_bytes_be(&decode_hex::<32>(
+            "11299eb10424d82de500a440a2874d12f7c477afb5a3eb31dbb96295cdbcf165",
+        )))
+        .unwrap_or_else(|error| panic!("nullifying key should validate: {error}"));
+
+        let nullifier = derive_nullifier(&nullifying_key, LeafIndex::new(12))
+            .unwrap_or_else(|error| panic!("nullifier should derive: {error}"));
+
+        assert_eq!(
+            nullifier.value(),
+            &BigUint::from_bytes_be(&decode_hex::<32>(
+                "1aeadb64bf8faff93dfe26bcf0b2e2d0e9724293cc7a455f028b6accabee13b8",
+            ))
+        );
+    }
+
+    #[test]
+    fn derives_nullifier_from_vector_three() {
+        let nullifying_key = NullifyingKey::new(BigUint::from_bytes_be(&decode_hex::<32>(
+            "09b57736523cda7412ddfed0d2f1f4a86d8a7e26de6b0638cd092c2a2b524705",
+        )))
+        .unwrap_or_else(|error| panic!("nullifying key should validate: {error}"));
+
+        let nullifier = derive_nullifier(&nullifying_key, LeafIndex::new(6_500))
+            .unwrap_or_else(|error| panic!("nullifier should derive: {error}"));
+
+        assert_eq!(
+            nullifier.value(),
+            &BigUint::from_bytes_be(&decode_hex::<32>(
+                "091961ce11c244db49a25668e57dfa2b5ffb1fe63055dd64a14af6f2be58b0e7",
+            ))
+        );
+    }
+
+    #[test]
     fn note_public_key_derivation_is_deterministic() {
         let master_public_key = MasterPublicKey::new(BigUint::from(42_u8))
             .unwrap_or_else(|error| panic!("master public key should validate: {error}"));
@@ -201,6 +280,19 @@ mod tests {
         let first = derive_note_commitment(&note_public_key, &token_hash, value)
             .unwrap_or_else(|error| panic!("first derivation should succeed: {error}"));
         let second = derive_note_commitment(&note_public_key, &token_hash, value)
+            .unwrap_or_else(|error| panic!("second derivation should succeed: {error}"));
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn nullifier_derivation_is_deterministic() {
+        let nullifying_key = derive_nullifying_key_from_bytes(&[7_u8; 32])
+            .unwrap_or_else(|error| panic!("nullifying key should derive: {error}"));
+
+        let first = derive_nullifier(&nullifying_key, LeafIndex::new(9))
+            .unwrap_or_else(|error| panic!("first derivation should succeed: {error}"));
+        let second = derive_nullifier(&nullifying_key, LeafIndex::new(9))
             .unwrap_or_else(|error| panic!("second derivation should succeed: {error}"));
 
         assert_eq!(first, second);
@@ -238,20 +330,33 @@ mod tests {
         let swapped_note_public_key =
             NotePublicKey::new(BigUint::from_bytes_be(token_hash.as_bytes()))
                 .unwrap_or_else(|error| panic!("swapped note public key should validate: {error}"));
-        let swapped_token_hash = TokenHash::from_slice(
-            &[0_u8; TokenHash::LENGTH - 1]
-                .iter()
-                .copied()
-                .chain(core::iter::once(42_u8))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap_or_else(|error| panic!("swapped token hash should validate: {error}"));
+        let mut swapped_token_hash_bytes = [0_u8; TokenHash::LENGTH];
+        swapped_token_hash_bytes[31] = 42;
+        let swapped_token_hash = TokenHash::from_slice(&swapped_token_hash_bytes)
+            .unwrap_or_else(|error| panic!("swapped token hash should validate: {error}"));
         let swapped = derive_note_commitment(
             &swapped_note_public_key,
             &swapped_token_hash,
             NoteValue::new(3_u128),
         )
         .unwrap_or_else(|error| panic!("swapped derivation should succeed: {error}"));
+
+        assert_ne!(ordered, swapped);
+    }
+
+    #[test]
+    fn nullifier_derivation_depends_on_input_ordering() {
+        let nullifying_key = derive_nullifying_key_from_bytes(&[7_u8; 32])
+            .unwrap_or_else(|error| panic!("nullifying key should derive: {error}"));
+
+        let ordered = derive_nullifier(&nullifying_key, LeafIndex::new(9))
+            .unwrap_or_else(|error| panic!("ordered derivation should succeed: {error}"));
+        let swapped_nullifying_key = derive_nullifying_key_from_bytes(
+            &[0_u8; 31].iter().copied().chain(core::iter::once(9_u8)).collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|error| panic!("swapped nullifying key should derive: {error}"));
+        let swapped = derive_nullifier(&swapped_nullifying_key, LeafIndex::new(7))
+            .unwrap_or_else(|error| panic!("swapped derivation should succeed: {error}"));
 
         assert_ne!(ordered, swapped);
     }
