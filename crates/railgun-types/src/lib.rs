@@ -381,6 +381,73 @@ impl MasterPublicKey {
     pub const fn value(&self) -> &BigUint {
         &self.0
     }
+
+    /// Returns the canonical 32-byte big-endian encoding.
+    #[must_use]
+    pub fn to_be_bytes(&self) -> [u8; 32] {
+        let bytes = self.0.to_bytes_be();
+        let mut padded = [0_u8; 32];
+        let start = 32 - bytes.len();
+        padded[start..].copy_from_slice(&bytes);
+        padded
+    }
+}
+
+/// Canonical all-zero sender-random sentinel used for visible-sender notes.
+pub const MEMO_SENDER_RANDOM_NULL_BYTES: [u8; 15] = [0_u8; 15];
+
+/// Typed 15-byte sender-random field controlling sender visibility in notes.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SenderRandom([u8; 15]);
+
+impl SenderRandom {
+    /// Length of a sender-random value in bytes.
+    pub const LENGTH: usize = 15;
+
+    /// Creates a sender-random value from raw bytes.
+    #[must_use]
+    pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the canonical all-zero visible-sender sentinel.
+    #[must_use]
+    pub const fn null_sentinel() -> Self {
+        Self(MEMO_SENDER_RANDOM_NULL_BYTES)
+    }
+
+    /// Creates a sender-random value from a byte slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `bytes` is not exactly 15 bytes long.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, ParseDomainError> {
+        let array: [u8; Self::LENGTH] = bytes
+            .try_into()
+            .map_err(|_| ParseDomainError::new("sender random must be exactly 15 bytes"))?;
+        Ok(Self::new(array))
+    }
+
+    /// Returns whether this value is the visible-sender null sentinel.
+    #[must_use]
+    pub fn is_null_sentinel(&self) -> bool {
+        self.0 == MEMO_SENDER_RANDOM_NULL_BYTES
+    }
+
+    /// Returns the raw sender-random bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+}
+
+/// Sender visibility mode derived from the sender-random field.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SenderVisibility {
+    /// Sender identity is recoverable by the receiver.
+    Visible,
+    /// Sender identity is hidden from the receiver.
+    Hidden,
 }
 
 /// Typed 16-byte note random used in note public key derivation.
@@ -1039,10 +1106,10 @@ mod tests {
     use num_bigint::BigUint;
 
     use super::{
-        Address, BN254_SCALAR_FIELD_MODULUS_BYTES, LeafIndex, MasterPublicKey, NotePublicKey,
-        NoteRandom, NoteValue, Nullifier, NullifyingKey, ParseDomainError, RailgunAddress,
-        SpendingPrivateKey, SpendingPublicKey, TokenData, TokenSubId, TokenType, ViewingPrivateKey,
-        ViewingPublicKey,
+        Address, BN254_SCALAR_FIELD_MODULUS_BYTES, LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES,
+        MasterPublicKey, NotePublicKey, NoteRandom, NoteValue, Nullifier, NullifyingKey,
+        ParseDomainError, RailgunAddress, SenderRandom, SenderVisibility, SpendingPrivateKey,
+        SpendingPublicKey, TokenData, TokenSubId, TokenType, ViewingPrivateKey, ViewingPublicKey,
     };
 
     const BN254_SCALAR_FIELD_MODULUS_DECIMAL: &str =
@@ -1086,6 +1153,14 @@ mod tests {
             panic!("invalid note value length should fail");
         };
         assert_eq!(error, ParseDomainError::new("note value must be exactly 16 bytes"));
+    }
+
+    #[test]
+    fn rejects_invalid_sender_random_length() {
+        let Err(error) = SenderRandom::from_slice(&[7_u8; 14]) else {
+            panic!("invalid sender random length should fail");
+        };
+        assert_eq!(error, ParseDomainError::new("sender random must be exactly 15 bytes"));
     }
 
     #[test]
@@ -1146,6 +1221,17 @@ mod tests {
         let leaf_index = LeafIndex::new(6_500);
 
         assert_eq!(leaf_index.get(), 6_500);
+    }
+
+    #[test]
+    fn sender_random_null_sentinel_matches_constant() {
+        assert_eq!(SenderRandom::null_sentinel().as_bytes(), &MEMO_SENDER_RANDOM_NULL_BYTES);
+        assert!(SenderRandom::null_sentinel().is_null_sentinel());
+    }
+
+    #[test]
+    fn sender_visibility_variants_are_distinct() {
+        assert_ne!(SenderVisibility::Visible, SenderVisibility::Hidden);
     }
 
     #[test]

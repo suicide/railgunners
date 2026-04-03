@@ -6,7 +6,7 @@ use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
 use railgun_types::{
     LeafIndex, MasterPublicKey, NoteCommitment, NotePublicKey, NoteRandom, NoteValue, Nullifier,
-    NullifyingKey, TokenHash,
+    NullifyingKey, SenderRandom, SenderVisibility, TokenHash,
 };
 
 use crate::hd::KeyDerivationError;
@@ -17,6 +17,47 @@ fn biguint_to_bn254_field(value: &BigUint) -> Result<Fr, KeyDerivationError> {
     let roundtrip = BigUint::from_bytes_be(&field.into_bigint().to_bytes_be());
 
     if roundtrip == *value { Ok(field) } else { Err(KeyDerivationError::DerivationFailure) }
+}
+
+/// Resolves sender visibility from the optional sender-random field.
+#[must_use]
+pub fn sender_visibility(sender_random: Option<&SenderRandom>) -> SenderVisibility {
+    match sender_random {
+        Some(sender_random) if !sender_random.is_null_sentinel() => SenderVisibility::Hidden,
+        Some(_) | None => SenderVisibility::Visible,
+    }
+}
+
+/// Encodes the receiver master public key according to sender visibility rules.
+///
+/// Hidden-sender notes preserve the receiver MPK. Visible-sender notes XOR the
+/// canonical 32-byte MPK encodings so both sides match upstream plaintext rules.
+///
+/// # Errors
+///
+/// Returns an error if the encoded master public key does not fit the canonical
+/// 32-byte MPK encoding.
+pub fn encode_master_public_key(
+    receiver_master_public_key: &MasterPublicKey,
+    sender_master_public_key: &MasterPublicKey,
+    sender_random: Option<&SenderRandom>,
+) -> Result<MasterPublicKey, KeyDerivationError> {
+    match sender_visibility(sender_random) {
+        SenderVisibility::Hidden => {
+            MasterPublicKey::new(receiver_master_public_key.value().clone())
+                .map_err(|_| KeyDerivationError::DerivationFailure)
+        }
+        SenderVisibility::Visible => {
+            // Upstream note plaintexts XOR the fixed-width 32-byte MPK encodings,
+            // not the trimmed BigUint byte slices.
+            let encoded_bytes: [u8; 32] = core::array::from_fn(|index| {
+                receiver_master_public_key.to_be_bytes()[index]
+                    ^ sender_master_public_key.to_be_bytes()[index]
+            });
+            MasterPublicKey::new(BigUint::from_bytes_be(&encoded_bytes))
+                .map_err(|_| KeyDerivationError::DerivationFailure)
+        }
+    }
 }
 
 /// Derives a note public key from a receiver master public key and 16-byte note random.
@@ -97,10 +138,14 @@ pub fn derive_nullifier(
 mod tests {
     use num_bigint::BigUint;
     use railgun_types::{
-        LeafIndex, MasterPublicKey, NotePublicKey, NoteRandom, NoteValue, NullifyingKey, TokenHash,
+        LeafIndex, MasterPublicKey, NotePublicKey, NoteRandom, NoteValue, NullifyingKey,
+        SenderRandom, SenderVisibility, TokenHash,
     };
 
-    use super::{derive_note_commitment, derive_note_public_key, derive_nullifier};
+    use super::{
+        derive_note_commitment, derive_note_public_key, derive_nullifier, encode_master_public_key,
+        sender_visibility,
+    };
     use crate::{derive_nullifying_key_from_bytes, hd::KeyDerivationError};
 
     fn decode_hex<const N: usize>(value: &str) -> [u8; N] {
@@ -118,6 +163,14 @@ mod tests {
             bytes[index] = ((high << 4) | low) as u8;
         }
         bytes
+    }
+
+    fn master_public_key(value: &str) -> MasterPublicKey {
+        MasterPublicKey::new(
+            BigUint::parse_bytes(value.as_bytes(), 10)
+                .unwrap_or_else(|| panic!("master public key should parse")),
+        )
+        .unwrap_or_else(|error| panic!("master public key should validate: {error}"))
     }
 
     #[test]
@@ -253,6 +306,63 @@ mod tests {
                 "091961ce11c244db49a25668e57dfa2b5ffb1fe63055dd64a14af6f2be58b0e7",
             ))
         );
+    }
+
+    #[test]
+    fn hidden_sender_mode_preserves_receiver_master_public_key() {
+        let receiver_master_public_key = master_public_key(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+        );
+        let sender_master_public_key = master_public_key("123456789");
+        let sender_random = SenderRandom::from_slice(&[7_u8; SenderRandom::LENGTH])
+            .unwrap_or_else(|error| panic!("sender random should validate: {error}"));
+
+        let encoded = encode_master_public_key(
+            &receiver_master_public_key,
+            &sender_master_public_key,
+            Some(&sender_random),
+        )
+        .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}"));
+
+        assert_eq!(sender_visibility(Some(&sender_random)), SenderVisibility::Hidden);
+        assert_eq!(encoded, receiver_master_public_key);
+    }
+
+    #[test]
+    fn visible_sender_mode_xors_receiver_and_sender_master_public_keys() {
+        let receiver_master_public_key = master_public_key(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+        );
+        let sender_master_public_key = master_public_key("123456789");
+
+        let encoded_without_sender_random =
+            encode_master_public_key(&receiver_master_public_key, &sender_master_public_key, None)
+                .unwrap_or_else(|error| {
+                    panic!("visible sender derivation should succeed: {error}")
+                });
+        let encoded_with_null_sentinel = encode_master_public_key(
+            &receiver_master_public_key,
+            &sender_master_public_key,
+            Some(&SenderRandom::null_sentinel()),
+        )
+        .unwrap_or_else(|error| panic!("null-sentinel derivation should succeed: {error}"));
+
+        let receiver_bytes = receiver_master_public_key.to_be_bytes();
+        let sender_bytes = sender_master_public_key.to_be_bytes();
+        let expected_bytes: [u8; 32] =
+            core::array::from_fn(|index| receiver_bytes[index] ^ sender_bytes[index]);
+        let expected = MasterPublicKey::new(BigUint::from_bytes_be(&expected_bytes))
+            .unwrap_or_else(|error| {
+                panic!("expected encoded master public key should validate: {error}")
+            });
+
+        assert_eq!(sender_visibility(None), SenderVisibility::Visible);
+        assert_eq!(
+            sender_visibility(Some(&SenderRandom::null_sentinel())),
+            SenderVisibility::Visible
+        );
+        assert_eq!(encoded_without_sender_random, expected);
+        assert_eq!(encoded_with_null_sentinel, expected);
     }
 
     #[test]
