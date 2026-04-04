@@ -3,7 +3,12 @@ all-features = true
 
 [advisories]
 version = 2
-ignore = []
+ignore = [
+    # Transitive through ark-ff/light-poseidon. No patched version exists yet,
+    # so we accept this temporary unmaintained advisory until upstream moves
+    # away from `paste`.
+    "RUSTSEC-2024-0436",
+]
 
 [licenses]
 version = 2
@@ -11,6 +16,7 @@ allow = [
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "CC0-1.0",
     "ISC",
     "MIT",
     "MPL-2.0",
