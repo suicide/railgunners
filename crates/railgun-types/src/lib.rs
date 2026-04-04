@@ -549,6 +549,39 @@ impl NoteRandom {
     }
 }
 
+/// Typed 16-byte shared random used in note blinding derivation.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SharedRandom([u8; 16]);
+
+impl SharedRandom {
+    /// Length of a shared random in bytes.
+    pub const LENGTH: usize = 16;
+
+    /// Creates a shared random from raw bytes.
+    #[must_use]
+    pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
+        Self(bytes)
+    }
+
+    /// Creates a shared random from a byte slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `bytes` is not exactly 16 bytes long.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, ParseDomainError> {
+        let array: [u8; Self::LENGTH] = bytes
+            .try_into()
+            .map_err(|_| ParseDomainError::new("shared random must be exactly 16 bytes"))?;
+        Ok(Self::new(array))
+    }
+
+    /// Returns the raw shared-random bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+}
+
 /// Typed Railgun note public key derived from receiver identity and note randomness.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NotePublicKey(BigUint);
@@ -1175,8 +1208,8 @@ mod tests {
         Address, BN254_SCALAR_FIELD_MODULUS_BYTES, BlindedViewingPublicKey, LeafIndex,
         MEMO_SENDER_RANDOM_NULL_BYTES, MasterPublicKey, NotePublicKey, NoteRandom, NoteValue,
         Nullifier, NullifyingKey, ParseDomainError, RailgunAddress, SenderRandom, SenderVisibility,
-        SharedSymmetricKey, SpendingPrivateKey, SpendingPublicKey, TokenData, TokenSubId,
-        TokenType, ViewingPrivateKey, ViewingPublicKey,
+        SharedRandom, SharedSymmetricKey, SpendingPrivateKey, SpendingPublicKey, TokenData,
+        TokenSubId, TokenType, ViewingPrivateKey, ViewingPublicKey,
     };
 
     const BN254_SCALAR_FIELD_MODULUS_DECIMAL: &str =
@@ -1231,6 +1264,14 @@ mod tests {
             panic!("invalid note random length should fail");
         };
         assert_eq!(error, ParseDomainError::new("note random must be exactly 16 bytes"));
+    }
+
+    #[test]
+    fn rejects_invalid_shared_random_length() {
+        let Err(error) = SharedRandom::from_slice(&[7_u8; 15]) else {
+            panic!("invalid shared random length should fail");
+        };
+        assert_eq!(error, ParseDomainError::new("shared random must be exactly 16 bytes"));
     }
 
     #[test]
