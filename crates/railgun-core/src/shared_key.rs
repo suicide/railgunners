@@ -111,7 +111,8 @@ mod tests {
             let low = (chunk[1] as char)
                 .to_digit(16)
                 .unwrap_or_else(|| panic!("invalid hex nibble at index {}", index * 2 + 1));
-            bytes[index] = ((high << 4) | low) as u8;
+            bytes[index] = u8::try_from((high << 4) | low)
+                .unwrap_or_else(|_| panic!("hex byte should fit into u8"));
         }
         bytes
     }

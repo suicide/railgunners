@@ -16,55 +16,7 @@ use std::io::Write;
 pub(crate) fn execute(command: KeysCommand, stdout: &mut dyn Write) -> Result<(), CliError> {
     match command {
         KeysCommand::Derive { mnemonic, index, show_secrets, json } => {
-            if !show_secrets {
-                return Err(CliError::command(
-                    "key derivation requires --show-secrets".to_owned(),
-                    json,
-                ));
-            }
-
-            let mnemonic = railgun_core::Bip39Mnemonic::parse(&mnemonic)
-                .map_err(|error| CliError::command(format!("invalid: {error}"), json))?;
-            let derived = derive_wallet_keys(&mnemonic, index)
-                .map_err(|error| CliError::command(error.to_string(), json))?;
-            let packed_spending_public_key =
-                pack_derived_spending_public_key(derived.spending_public_key())
-                    .map_err(|error| CliError::command(error.to_string(), json))?;
-
-            if json {
-                write_json(
-                    stdout,
-                    &DerivedKeysJson::from_derived(&derived, &packed_spending_public_key),
-                )?;
-            } else {
-                writeln!(stdout, "index: {}", derived.index())?;
-                writeln!(stdout, "spendingPath: {}", derived.spending_path())?;
-                writeln!(stdout, "viewingPath: {}", derived.viewing_path())?;
-                writeln!(
-                    stdout,
-                    "spendingPrivateKey: {}",
-                    hex::encode(derived.spending_private_key().as_bytes())
-                )?;
-                writeln!(stdout, "spendingPublicKey.x: {}", derived.spending_public_key().x())?;
-                writeln!(stdout, "spendingPublicKey.y: {}", derived.spending_public_key().y())?;
-                writeln!(
-                    stdout,
-                    "packedSpendingPublicKey: {}",
-                    hex::encode(packed_spending_public_key.as_bytes())
-                )?;
-                writeln!(
-                    stdout,
-                    "viewingPrivateKey: {}",
-                    hex::encode(derived.viewing_private_key().as_bytes())
-                )?;
-                writeln!(
-                    stdout,
-                    "viewingPublicKey: {}",
-                    hex::encode(derived.viewing_public_key().as_bytes())
-                )?;
-                writeln!(stdout, "nullifyingKey: {}", derived.nullifying_key().value())?;
-                writeln!(stdout, "masterPublicKey: {}", derived.master_public_key().value())?;
-            }
+            execute_derive(&mnemonic, index, show_secrets, json, stdout)?;
         }
         KeysCommand::InspectViewingPrivate { private_key, json } => {
             let private_key = parse_viewing_private_key(&private_key, json)?;
@@ -136,6 +88,65 @@ pub(crate) fn execute(command: KeysCommand, stdout: &mut dyn Write) -> Result<()
         }
     }
 
+    Ok(())
+}
+
+fn execute_derive(
+    mnemonic: &str,
+    index: u32,
+    show_secrets: bool,
+    json: bool,
+    stdout: &mut dyn Write,
+) -> Result<(), CliError> {
+    if !show_secrets {
+        return Err(CliError::command("key derivation requires --show-secrets".to_owned(), json));
+    }
+
+    let mnemonic = railgun_core::Bip39Mnemonic::parse(mnemonic)
+        .map_err(|error| CliError::command(format!("invalid: {error}"), json))?;
+    let derived = derive_wallet_keys(&mnemonic, index)
+        .map_err(|error| CliError::command(error.to_string(), json))?;
+    let packed_spending_public_key =
+        pack_derived_spending_public_key(derived.spending_public_key())
+            .map_err(|error| CliError::command(error.to_string(), json))?;
+
+    if json {
+        write_json(stdout, &DerivedKeysJson::from_derived(&derived, &packed_spending_public_key))?;
+    } else {
+        write_derived_keys(stdout, &derived, &packed_spending_public_key)?;
+    }
+
+    Ok(())
+}
+
+fn write_derived_keys(
+    stdout: &mut dyn Write,
+    derived: &DerivedWalletKeys,
+    packed_spending_public_key: &railgun_types::PackedSpendingPublicKey,
+) -> Result<(), CliError> {
+    writeln!(stdout, "index: {}", derived.index())?;
+    writeln!(stdout, "spendingPath: {}", derived.spending_path())?;
+    writeln!(stdout, "viewingPath: {}", derived.viewing_path())?;
+    writeln!(
+        stdout,
+        "spendingPrivateKey: {}",
+        hex::encode(derived.spending_private_key().as_bytes())
+    )?;
+    writeln!(stdout, "spendingPublicKey.x: {}", derived.spending_public_key().x())?;
+    writeln!(stdout, "spendingPublicKey.y: {}", derived.spending_public_key().y())?;
+    writeln!(
+        stdout,
+        "packedSpendingPublicKey: {}",
+        hex::encode(packed_spending_public_key.as_bytes())
+    )?;
+    writeln!(
+        stdout,
+        "viewingPrivateKey: {}",
+        hex::encode(derived.viewing_private_key().as_bytes())
+    )?;
+    writeln!(stdout, "viewingPublicKey: {}", hex::encode(derived.viewing_public_key().as_bytes()))?;
+    writeln!(stdout, "nullifyingKey: {}", derived.nullifying_key().value())?;
+    writeln!(stdout, "masterPublicKey: {}", derived.master_public_key().value())?;
     Ok(())
 }
 

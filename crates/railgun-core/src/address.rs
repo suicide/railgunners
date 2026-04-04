@@ -515,9 +515,9 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_decoded_address_version() {
-        let invalid_address = bech32_address_from_payload(
-            [vec![2_u8], vec![0_u8; 32], hex_decode("7261696c67756e01"), vec![0_u8; 32]].concat(),
-        );
+        let payload =
+            [vec![2_u8], vec![0_u8; 32], hex_decode("7261696c67756e01"), vec![0_u8; 32]].concat();
+        let invalid_address = bech32_address_from_payload(&payload);
 
         let error = expect_err(
             decode_railgun_address(&invalid_address),
@@ -529,7 +529,8 @@ mod tests {
 
     #[test]
     fn rejects_wrong_payload_length() {
-        let invalid_address = bech32_address_from_payload(vec![0_u8; ADDRESS_PAYLOAD_LENGTH - 1]);
+        let payload = vec![0_u8; ADDRESS_PAYLOAD_LENGTH - 1];
+        let invalid_address = bech32_address_from_payload(&payload);
 
         let error =
             expect_err(decode_railgun_address(&invalid_address), "short payload should fail");
@@ -539,8 +540,8 @@ mod tests {
 
     #[test]
     fn rejects_non_bech32m_checksum() {
-        let invalid_address =
-            bech32_address_from_payload_bech32(vec![0_u8; ADDRESS_PAYLOAD_LENGTH]);
+        let payload = vec![0_u8; ADDRESS_PAYLOAD_LENGTH];
+        let invalid_address = bech32_address_from_payload_bech32(&payload);
 
         let error =
             expect_err(decode_railgun_address(&invalid_address), "bech32 checksum should fail");
@@ -557,15 +558,15 @@ mod tests {
         assert_eq!(error.to_string(), "chain id must fit within 56 bits");
     }
 
-    fn bech32_address_from_payload(payload: Vec<u8>) -> String {
+    fn bech32_address_from_payload(payload: &[u8]) -> String {
         let hrp = Hrp::parse("0zk").unwrap_or_else(|_| panic!("test hrp should be valid"));
-        bech32::encode::<Bech32m>(hrp, &payload)
+        bech32::encode::<Bech32m>(hrp, payload)
             .unwrap_or_else(|_| panic!("test bech32m encoding should succeed"))
     }
 
-    fn bech32_address_from_payload_bech32(payload: Vec<u8>) -> String {
+    fn bech32_address_from_payload_bech32(payload: &[u8]) -> String {
         let hrp = Hrp::parse("0zk").unwrap_or_else(|_| panic!("test hrp should be valid"));
-        bech32::encode::<bech32::Bech32>(hrp, &payload)
+        bech32::encode::<bech32::Bech32>(hrp, payload)
             .unwrap_or_else(|_| panic!("test bech32 encoding should succeed"))
     }
 

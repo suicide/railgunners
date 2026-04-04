@@ -24,31 +24,6 @@ pub(crate) struct DerivedWalletKeys {
 
 impl DerivedWalletKeys {
     #[must_use]
-    pub(crate) fn new(
-        index: u32,
-        spending_path: DerivationPath,
-        viewing_path: DerivationPath,
-        spending_private_key: SpendingPrivateKey,
-        spending_public_key: SpendingPublicKey,
-        viewing_private_key: ViewingPrivateKey,
-        viewing_public_key: ViewingPublicKey,
-        nullifying_key: NullifyingKey,
-        master_public_key: MasterPublicKey,
-    ) -> Self {
-        Self {
-            index,
-            spending_path,
-            viewing_path,
-            spending_private_key,
-            spending_public_key,
-            viewing_private_key,
-            viewing_public_key,
-            nullifying_key,
-            master_public_key,
-        }
-    }
-
-    #[must_use]
     pub(crate) const fn index(&self) -> u32 {
         self.index
     }
@@ -127,8 +102,8 @@ pub(crate) fn derive_wallet_keys(
     let nullifying_key = derive_nullifying_key(&viewing_private_key)?;
     let master_public_key = derive_master_public_key(&spending_public_key, &nullifying_key)?;
 
-    Ok(DerivedWalletKeys::new(
-        wallet_index,
+    Ok(DerivedWalletKeys {
+        index: wallet_index,
         spending_path,
         viewing_path,
         spending_private_key,
@@ -137,7 +112,7 @@ pub(crate) fn derive_wallet_keys(
         viewing_public_key,
         nullifying_key,
         master_public_key,
-    ))
+    })
 }
 
 pub(crate) fn inspect_viewing_private_key(

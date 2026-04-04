@@ -117,9 +117,9 @@ impl TokenSubId {
 /// bytes. ERC20 values must use the zero sub-ID.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TokenData {
-    token_address: Address,
-    token_type: TokenType,
-    token_sub_id: TokenSubId,
+    address: Address,
+    kind: TokenType,
+    sub_id: TokenSubId,
 }
 
 impl TokenData {
@@ -137,31 +137,31 @@ impl TokenData {
             return Err(ParseDomainError::new("erc20 token sub id must be zero"));
         }
 
-        Ok(Self { token_address, token_type, token_sub_id })
+        Ok(Self { address: token_address, kind: token_type, sub_id: token_sub_id })
     }
 
     /// Creates canonical ERC20 token data with the required zero sub-ID.
     #[must_use]
     pub const fn erc20(token_address: Address) -> Self {
-        Self { token_address, token_type: TokenType::ERC20, token_sub_id: TokenSubId::zero() }
+        Self { address: token_address, kind: TokenType::ERC20, sub_id: TokenSubId::zero() }
     }
 
     /// Returns the semantic token address.
     #[must_use]
     pub const fn token_address(&self) -> Address {
-        self.token_address
+        self.address
     }
 
     /// Returns the token type discriminator.
     #[must_use]
     pub const fn token_type(&self) -> TokenType {
-        self.token_type
+        self.kind
     }
 
     /// Returns the canonical 32-byte token sub-ID.
     #[must_use]
     pub const fn token_sub_id(&self) -> &TokenSubId {
-        &self.token_sub_id
+        &self.sub_id
     }
 }
 

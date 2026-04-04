@@ -69,8 +69,8 @@ impl SpendingPublicKey {
     ///
     /// # Errors
     ///
-    /// Returns an error if either coordinate is outside the BabyJubJub field or
-    /// if the coordinates do not represent a valid compressible BabyJubJub point.
+    /// Returns an error if either coordinate is outside the `BabyJubJub` field or
+    /// if the coordinates do not represent a valid compressible `BabyJubJub` point.
     pub fn new(x: BigUint, y: BigUint) -> Result<Self, ParseDomainError> {
         let point =
             Point { x: biguint_to_babyjubjub_field(&x)?, y: biguint_to_babyjubjub_field(&y)? };

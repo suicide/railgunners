@@ -29,28 +29,28 @@ fn biguint_to_32_bytes(value: &BigUint) -> [u8; PADDED_TOKEN_FIELD_LENGTH] {
 /// Canonical encoded token data used by note and transaction primitives.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CanonicalTokenData {
-    token_address: [u8; PADDED_TOKEN_FIELD_LENGTH],
-    token_type: TokenType,
-    token_sub_id: [u8; PADDED_TOKEN_FIELD_LENGTH],
+    address: [u8; PADDED_TOKEN_FIELD_LENGTH],
+    kind: TokenType,
+    sub_id: [u8; PADDED_TOKEN_FIELD_LENGTH],
 }
 
 impl CanonicalTokenData {
     /// Returns the canonical 32-byte padded token address.
     #[must_use]
     pub const fn token_address(&self) -> &[u8; PADDED_TOKEN_FIELD_LENGTH] {
-        &self.token_address
+        &self.address
     }
 
     /// Returns the stable token type discriminator.
     #[must_use]
     pub const fn token_type(&self) -> TokenType {
-        self.token_type
+        self.kind
     }
 
     /// Returns the canonical 32-byte token sub-ID.
     #[must_use]
     pub const fn token_sub_id(&self) -> &[u8; PADDED_TOKEN_FIELD_LENGTH] {
-        &self.token_sub_id
+        &self.sub_id
     }
 }
 
@@ -58,9 +58,9 @@ impl CanonicalTokenData {
 #[must_use]
 pub fn encode_token_data(token_data: &TokenData) -> CanonicalTokenData {
     CanonicalTokenData {
-        token_address: padded_token_address(token_data.token_address()),
-        token_type: token_data.token_type(),
-        token_sub_id: *token_data.token_sub_id().as_bytes(),
+        address: padded_token_address(token_data.token_address()),
+        kind: token_data.token_type(),
+        sub_id: *token_data.token_sub_id().as_bytes(),
     }
 }
 
@@ -101,7 +101,8 @@ mod tests {
             let low = (chunk[1] as char)
                 .to_digit(16)
                 .unwrap_or_else(|| panic!("invalid hex nibble at index {}", index * 2 + 1));
-            bytes[index] = ((high << 4) | low) as u8;
+            bytes[index] = u8::try_from((high << 4) | low)
+                .unwrap_or_else(|_| panic!("hex byte should fit into u8"));
         }
         bytes
     }
