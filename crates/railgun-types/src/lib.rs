@@ -1,6 +1,7 @@
 //! Shared domain types for the RAILGUN workspace.
 
 mod address;
+mod ciphertext_v2;
 mod error;
 mod field;
 mod keys;
@@ -10,6 +11,7 @@ mod token;
 pub use address::{
     ChainScope, ChainType, NetworkId, RailgunAddress, RailgunAddressData, RailgunChain,
 };
+pub use ciphertext_v2::{V2CiphertextBlock, V2CiphertextBundle, V2Plaintext};
 pub use error::ParseDomainError;
 pub(crate) use field::validate_bn254_scalar;
 pub use field::{BN254_SCALAR_FIELD_MODULUS_BYTES, bn254_scalar_field_modulus};

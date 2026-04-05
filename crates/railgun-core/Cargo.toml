@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+aes-gcm = "0.10.3"
 ark-bn254 = "0.5.0"
 ark-ff = "0.5.0"
 babyjubjub-rs.workspace = true
