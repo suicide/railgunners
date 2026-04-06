@@ -5,6 +5,7 @@ pub mod bip39;
 pub mod blinding;
 pub mod ciphertext_v2;
 pub mod ciphertext_v3;
+pub mod commitment_ciphertext;
 pub mod hd;
 pub mod keys;
 pub mod network_id;
@@ -27,6 +28,9 @@ pub use ciphertext_v2::{
 pub use ciphertext_v3::{
     V3CiphertextError, decode_v3_plaintext, decrypt_v3_ciphertext, encode_v3_plaintext,
     encrypt_v3_ciphertext,
+};
+pub use commitment_ciphertext::{
+    CommitmentCiphertextError, parse_commitment_ciphertext_v2, parse_commitment_ciphertext_v3,
 };
 pub use hd::{
     DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,
