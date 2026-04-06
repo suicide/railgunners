@@ -8,6 +8,7 @@ mod error;
 mod field;
 mod keys;
 mod note;
+mod shield_ciphertext;
 mod token;
 
 pub use address::{
@@ -30,4 +31,5 @@ pub use note::{
     LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, NoteCommitment, NotePublicKey, NoteRandom, NoteValue,
     Nullifier, SenderRandom, SenderVisibility, SharedRandom,
 };
+pub use shield_ciphertext::{ShieldCiphertext, ShieldCiphertextBlock};
 pub use token::{Address, ChainId, TokenData, TokenHash, TokenSubId, TokenType, TxHash};

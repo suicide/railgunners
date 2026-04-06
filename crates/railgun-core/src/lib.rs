@@ -12,6 +12,7 @@ pub mod network_id;
 pub mod note;
 pub mod shareable_viewing_key;
 pub mod shared_key;
+pub mod shield_ciphertext;
 pub mod token;
 
 use railgun_types::{Address, ChainId, TxHash};
@@ -53,6 +54,9 @@ pub use shareable_viewing_key::{
 };
 pub use shared_key::{
     SharedKeyError, derive_shared_symmetric_key, derive_shared_symmetric_key_from_bytes,
+};
+pub use shield_ciphertext::{
+    ShieldCiphertextError, decrypt_shield_random, parse_shield_ciphertext,
 };
 pub use token::{CanonicalTokenData, derive_token_hash, encode_token_data};
 
