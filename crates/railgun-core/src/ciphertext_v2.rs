@@ -210,7 +210,7 @@ mod tests {
         annotation_data_hex: &'static str,
     }
 
-    /// See https://github.com/suicide/railgun-rs/issues/25
+    /// See <https://github.com/suicide/railgun-rs/issues/25>
     const FIXTURES: [V2Fixture; 3] = [
         V2Fixture {
             id: "v2-hidden-empty-memo",

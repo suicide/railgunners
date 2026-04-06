@@ -4,6 +4,7 @@ pub mod address;
 pub mod bip39;
 pub mod blinding;
 pub mod ciphertext_v2;
+pub mod ciphertext_v3;
 pub mod hd;
 pub mod keys;
 pub mod network_id;
@@ -22,6 +23,10 @@ pub use blinding::{BlindingError, derive_note_blinding_keys, unblind_note_key};
 pub use ciphertext_v2::{
     V2CiphertextError, decode_v2_plaintext, decrypt_v2_ciphertext, encode_v2_plaintext,
     encrypt_v2_ciphertext,
+};
+pub use ciphertext_v3::{
+    V3CiphertextError, decode_v3_plaintext, decrypt_v3_ciphertext, encode_v3_plaintext,
+    encrypt_v3_ciphertext,
 };
 pub use hd::{
     DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,
