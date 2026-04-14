@@ -61,6 +61,42 @@ pub enum SenderVisibility {
     Hidden,
 }
 
+/// Explicit sender-recovery outcome derived from encoded MPK visibility rules.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SenderRecovery {
+    visibility: SenderVisibility,
+    sender_master_public_key: Option<MasterPublicKey>,
+}
+
+impl SenderRecovery {
+    /// Creates a sender-recovery result.
+    #[must_use]
+    pub const fn new(
+        visibility: SenderVisibility,
+        sender_master_public_key: Option<MasterPublicKey>,
+    ) -> Self {
+        Self { visibility, sender_master_public_key }
+    }
+
+    /// Returns the resolved sender visibility mode.
+    #[must_use]
+    pub const fn visibility(&self) -> SenderVisibility {
+        self.visibility
+    }
+
+    /// Returns the recovered sender master public key when visibility permits it.
+    #[must_use]
+    pub const fn sender_master_public_key(&self) -> Option<&MasterPublicKey> {
+        self.sender_master_public_key.as_ref()
+    }
+
+    /// Returns whether sender visibility is enabled.
+    #[must_use]
+    pub const fn sender_visible(&self) -> bool {
+        matches!(self.visibility, SenderVisibility::Visible)
+    }
+}
+
 /// Minimal note party identity used during note construction.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NoteParty {
@@ -435,7 +471,7 @@ mod tests {
     use super::{
         LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment, NoteParty, NotePerspective,
         NotePublicKey, NoteRandom, NoteValue, Nullifier, ReconstructedNote, SenderRandom,
-        SenderVisibility, SharedRandom,
+        SenderRecovery, SenderVisibility, SharedRandom,
     };
     use crate::{
         MasterPublicKey, ParseDomainError, TokenHash, ViewingPublicKey, bn254_scalar_field_modulus,
@@ -523,6 +559,24 @@ mod tests {
     #[test]
     fn sender_visibility_variants_are_distinct() {
         assert_ne!(SenderVisibility::Visible, SenderVisibility::Hidden);
+    }
+
+    #[test]
+    fn sender_recovery_preserves_visibility_and_optional_sender() {
+        let sender_master_public_key = MasterPublicKey::new(1_u8.into())
+            .unwrap_or_else(|error| panic!("sender master public key should validate: {error}"));
+
+        let visible =
+            SenderRecovery::new(SenderVisibility::Visible, Some(sender_master_public_key.clone()));
+        let hidden = SenderRecovery::new(SenderVisibility::Hidden, None);
+
+        assert!(visible.sender_visible());
+        assert_eq!(visible.visibility(), SenderVisibility::Visible);
+        assert_eq!(visible.sender_master_public_key(), Some(&sender_master_public_key));
+
+        assert!(!hidden.sender_visible());
+        assert_eq!(hidden.visibility(), SenderVisibility::Hidden);
+        assert_eq!(hidden.sender_master_public_key(), None);
     }
 
     #[test]

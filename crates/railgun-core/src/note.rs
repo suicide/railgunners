@@ -7,8 +7,8 @@ use num_bigint::BigUint;
 use railgun_types::{
     BlindedViewingPublicKey, LeafIndex, MasterPublicKey, Note, NoteCommitment, NoteParty,
     NotePerspective, NotePublicKey, NoteRandom, NoteValue, Nullifier, NullifyingKey,
-    ReconstructedNote, SenderRandom, SenderVisibility, SharedRandom, TokenHash, V2Plaintext,
-    V3Plaintext,
+    ReconstructedNote, SenderRandom, SenderRecovery, SenderVisibility, SharedRandom, TokenHash,
+    V2Plaintext, V3Plaintext,
 };
 
 use crate::{blinding::BlindingError, hd::KeyDerivationError, unblind_note_key};
@@ -139,6 +139,34 @@ pub fn decode_master_public_key(
     }
 }
 
+/// Recovers sender identity from an encoded MPK under the sender-visibility rules.
+///
+/// Hidden-sender notes carry the receiver MPK directly, so recovery must not infer
+/// a sender from `encoded_master_public_key`. Visible-sender notes XOR the fixed-
+/// width receiver and sender MPK encodings, so recovery reverses that XOR.
+///
+/// # Errors
+///
+/// Returns an error if visible-sender recovery produces a master public key that
+/// does not fit the canonical 32-byte MPK encoding.
+pub fn recover_sender(
+    encoded_master_public_key: &MasterPublicKey,
+    receiver_master_public_key: &MasterPublicKey,
+    sender_random: Option<&SenderRandom>,
+) -> Result<SenderRecovery, KeyDerivationError> {
+    match sender_visibility(sender_random) {
+        SenderVisibility::Hidden => Ok(SenderRecovery::new(SenderVisibility::Hidden, None)),
+        SenderVisibility::Visible => Ok(SenderRecovery::new(
+            SenderVisibility::Visible,
+            Some(decode_master_public_key(
+                receiver_master_public_key,
+                encoded_master_public_key,
+                Some(&SenderRandom::null_sentinel()),
+            )?),
+        )),
+    }
+}
+
 /// Derives a note public key from a receiver master public key and 16-byte note random.
 ///
 /// Poseidon input ordering is exactly `[receiver_master_public_key, random]`
@@ -235,17 +263,29 @@ fn reconstruct_received_note(
 ) -> Result<ReconstructedNote, NoteReconstructionError> {
     let receiver = inputs.wallet.clone();
     let shared_random = shared_random_from_note_random(inputs.random);
-    let sender = match inputs.sender_random {
-        Some(sender_random) if !sender_random.is_null_sentinel() => None,
-        _ if inputs.encoded_master_public_key == inputs.wallet.master_public_key() => None,
-        _ => {
+    let sender_recovery = recover_sender(
+        inputs.encoded_master_public_key,
+        inputs.wallet.master_public_key(),
+        inputs.sender_random.as_ref(),
+    )
+    .map_err(|_| NoteReconstructionError::InvalidMasterPublicKey)?;
+    let sender = match sender_recovery.visibility() {
+        SenderVisibility::Hidden => None,
+        SenderVisibility::Visible
+            if inputs.sender_random.is_none()
+                && inputs.encoded_master_public_key == inputs.wallet.master_public_key() =>
+        {
+            None
+        }
+        SenderVisibility::Visible => {
             let visible_sender_random = SenderRandom::null_sentinel();
-            let sender_master_public_key = decode_master_public_key(
-                inputs.wallet.master_public_key(),
-                inputs.encoded_master_public_key,
-                Some(&visible_sender_random),
-            )
-            .map_err(|_| NoteReconstructionError::InvalidMasterPublicKey)?;
+            // V2 received notes do not carry sender_random, so `encodedMPK == receiverMPK`
+            // remains ambiguous. Keep treating that case as hidden to avoid inventing a
+            // visible sender that was not actually disclosed by the sender.
+            let sender_master_public_key = sender_recovery
+                .sender_master_public_key()
+                .cloned()
+                .ok_or(NoteReconstructionError::InvalidMasterPublicKey)?;
             let sender_viewing_public_key = unblind_note_key(
                 blinded_sender_viewing_key,
                 &shared_random,
@@ -445,13 +485,14 @@ mod tests {
     use railgun_types::{
         BlindedViewingPublicKey, LeafIndex, MasterPublicKey, NoteCommitment, NoteParty,
         NotePerspective, NotePublicKey, NoteRandom, NoteValue, NullifyingKey, SenderRandom,
-        SenderVisibility, SharedRandom, TokenHash, V2Plaintext, V3Plaintext, ViewingPrivateKey,
+        SenderRecovery, SenderVisibility, SharedRandom, TokenHash, V2Plaintext, V3Plaintext,
+        ViewingPrivateKey,
     };
 
     use super::{
         NoteReconstructionError, decode_master_public_key, derive_note_commitment,
         derive_note_public_key, derive_nullifier, encode_master_public_key, reconstruct_v2_note,
-        reconstruct_v3_note, sender_visibility, validate_note_commitment,
+        reconstruct_v3_note, recover_sender, sender_visibility, validate_note_commitment,
     };
     use crate::{
         derive_note_blinding_keys, derive_nullifying_key_from_bytes, derive_viewing_public_key,
@@ -826,6 +867,74 @@ mod tests {
         .unwrap_or_else(|error| panic!("decoded master public key should derive: {error}"));
 
         assert_eq!(decoded, sender_master_public_key);
+    }
+
+    #[test]
+    fn recover_sender_returns_visible_sender_master_public_key() {
+        let receiver_master_public_key = master_public_key(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+        );
+        let sender_master_public_key = master_public_key("123456789");
+        let encoded = encode_master_public_key(
+            &receiver_master_public_key,
+            &sender_master_public_key,
+            Some(&SenderRandom::null_sentinel()),
+        )
+        .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}"));
+
+        let recovered = recover_sender(
+            &encoded,
+            &receiver_master_public_key,
+            Some(&SenderRandom::null_sentinel()),
+        )
+        .unwrap_or_else(|error| panic!("visible sender recovery should succeed: {error}"));
+
+        assert_eq!(
+            recovered,
+            SenderRecovery::new(SenderVisibility::Visible, Some(sender_master_public_key))
+        );
+        assert!(recovered.sender_visible());
+    }
+
+    #[test]
+    fn recover_sender_returns_none_in_hidden_mode() {
+        let receiver_master_public_key = master_public_key(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+        );
+        let sender_master_public_key = master_public_key("123456789");
+        let sender_random = SenderRandom::from_slice(&[7_u8; SenderRandom::LENGTH])
+            .unwrap_or_else(|error| panic!("sender random should validate: {error}"));
+        let encoded = encode_master_public_key(
+            &receiver_master_public_key,
+            &sender_master_public_key,
+            Some(&sender_random),
+        )
+        .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}"));
+
+        let recovered = recover_sender(&encoded, &receiver_master_public_key, Some(&sender_random))
+            .unwrap_or_else(|error| panic!("hidden sender recovery should succeed: {error}"));
+
+        assert_eq!(recovered, SenderRecovery::new(SenderVisibility::Hidden, None));
+        assert!(!recovered.sender_visible());
+    }
+
+    #[test]
+    fn recover_sender_treats_missing_sender_random_as_visible() {
+        let receiver_master_public_key = master_public_key(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+        );
+        let sender_master_public_key = master_public_key("123456789");
+        let encoded =
+            encode_master_public_key(&receiver_master_public_key, &sender_master_public_key, None)
+                .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}"));
+
+        let recovered = recover_sender(&encoded, &receiver_master_public_key, None)
+            .unwrap_or_else(|error| panic!("sender recovery should succeed: {error}"));
+
+        assert_eq!(
+            recovered,
+            SenderRecovery::new(SenderVisibility::Visible, Some(sender_master_public_key))
+        );
     }
 
     #[test]

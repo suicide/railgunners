@@ -30,7 +30,7 @@ pub use keys::{
 pub use note::{
     LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment, NoteParty, NotePerspective,
     NotePublicKey, NoteRandom, NoteValue, Nullifier, ReconstructedNote, SenderRandom,
-    SenderVisibility, SharedRandom,
+    SenderRecovery, SenderVisibility, SharedRandom,
 };
 pub use shield_ciphertext::{ShieldCiphertext, ShieldCiphertextBlock};
 pub use token::{Address, ChainId, TokenData, TokenHash, TokenSubId, TokenType, TxHash};

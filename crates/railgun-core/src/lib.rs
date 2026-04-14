@@ -47,7 +47,7 @@ pub use network_id::{NetworkIdError, decode_network_id, encode_network_id};
 pub use note::{
     NoteReconstructionError, decode_master_public_key, derive_note_commitment,
     derive_note_public_key, derive_nullifier, encode_master_public_key, reconstruct_v2_note,
-    reconstruct_v3_note, sender_visibility, validate_note_commitment,
+    reconstruct_v3_note, recover_sender, sender_visibility, validate_note_commitment,
 };
 pub use shareable_viewing_key::{
     ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
