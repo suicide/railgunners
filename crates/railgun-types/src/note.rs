@@ -1,6 +1,8 @@
 use num_bigint::BigUint;
 
-use crate::{ParseDomainError, validate_bn254_scalar};
+use crate::{
+    MasterPublicKey, ParseDomainError, TokenHash, ViewingPublicKey, validate_bn254_scalar,
+};
 
 /// Canonical all-zero sender-random sentinel used for visible-sender notes.
 pub const MEMO_SENDER_RANDOM_NULL_BYTES: [u8; 15] = [0_u8; 15];
@@ -57,6 +59,45 @@ pub enum SenderVisibility {
     Visible,
     /// Sender identity is hidden from the receiver.
     Hidden,
+}
+
+/// Minimal note party identity used during note construction.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NoteParty {
+    master_public_key: MasterPublicKey,
+    viewing_public_key: ViewingPublicKey,
+}
+
+impl NoteParty {
+    /// Creates a note party from explicit key components.
+    #[must_use]
+    pub const fn new(
+        master_public_key: MasterPublicKey,
+        viewing_public_key: ViewingPublicKey,
+    ) -> Self {
+        Self { master_public_key, viewing_public_key }
+    }
+
+    /// Returns the party master public key.
+    #[must_use]
+    pub const fn master_public_key(&self) -> &MasterPublicKey {
+        &self.master_public_key
+    }
+
+    /// Returns the party viewing public key.
+    #[must_use]
+    pub const fn viewing_public_key(&self) -> &ViewingPublicKey {
+        &self.viewing_public_key
+    }
+}
+
+/// Perspective used when reconstructing a note from decrypted ciphertext.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum NotePerspective {
+    /// The note was received by the current wallet.
+    Received,
+    /// The note was sent by the current wallet.
+    Sent,
 }
 
 /// Typed 16-byte note random used in note public key derivation.
@@ -214,6 +255,141 @@ impl NoteCommitment {
     }
 }
 
+/// Canonical note recovered from ciphertext or other protocol data.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Note {
+    receiver: NoteParty,
+    sender: Option<NoteParty>,
+    token_hash: TokenHash,
+    random: NoteRandom,
+    value: NoteValue,
+    sender_random: Option<SenderRandom>,
+    memo: Vec<u8>,
+    public_key: NotePublicKey,
+    commitment: NoteCommitment,
+}
+
+impl Note {
+    /// Creates a note from explicit components.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        receiver: NoteParty,
+        sender: Option<NoteParty>,
+        token_hash: TokenHash,
+        random: NoteRandom,
+        value: NoteValue,
+        sender_random: Option<SenderRandom>,
+        memo: Vec<u8>,
+        note_public_key: NotePublicKey,
+        commitment: NoteCommitment,
+    ) -> Self {
+        Self {
+            receiver,
+            sender,
+            token_hash,
+            random,
+            value,
+            sender_random,
+            memo,
+            public_key: note_public_key,
+            commitment,
+        }
+    }
+
+    /// Returns the receiver party.
+    #[must_use]
+    pub const fn receiver(&self) -> &NoteParty {
+        &self.receiver
+    }
+
+    /// Returns the sender party when sender visibility allows reconstruction.
+    #[must_use]
+    pub const fn sender(&self) -> Option<&NoteParty> {
+        self.sender.as_ref()
+    }
+
+    /// Returns the token hash.
+    #[must_use]
+    pub const fn token_hash(&self) -> &TokenHash {
+        &self.token_hash
+    }
+
+    /// Returns the note random.
+    #[must_use]
+    pub const fn random(&self) -> &NoteRandom {
+        &self.random
+    }
+
+    /// Returns the note value.
+    #[must_use]
+    pub const fn value(&self) -> NoteValue {
+        self.value
+    }
+
+    /// Returns the sender random when available.
+    #[must_use]
+    pub const fn sender_random(&self) -> Option<&SenderRandom> {
+        self.sender_random.as_ref()
+    }
+
+    /// Returns the raw memo bytes.
+    #[must_use]
+    pub fn memo(&self) -> &[u8] {
+        &self.memo
+    }
+
+    /// Returns the recomputed note public key.
+    #[must_use]
+    pub const fn note_public_key(&self) -> &NotePublicKey {
+        &self.public_key
+    }
+
+    /// Returns the recomputed commitment.
+    #[must_use]
+    pub const fn commitment(&self) -> &NoteCommitment {
+        &self.commitment
+    }
+}
+
+/// Note plus reconstruction provenance recovered from decrypted ciphertext.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReconstructedNote {
+    note: Note,
+    perspective: NotePerspective,
+    encoded_master_public_key: MasterPublicKey,
+}
+
+impl ReconstructedNote {
+    /// Creates a reconstructed note and its provenance wrapper.
+    #[must_use]
+    pub const fn new(
+        note: Note,
+        perspective: NotePerspective,
+        encoded_master_public_key: MasterPublicKey,
+    ) -> Self {
+        Self { note, perspective, encoded_master_public_key }
+    }
+
+    /// Returns the reconstructed note.
+    #[must_use]
+    pub const fn note(&self) -> &Note {
+        &self.note
+    }
+
+    /// Returns the reconstruction perspective.
+    #[must_use]
+    pub const fn perspective(&self) -> NotePerspective {
+        self.perspective
+    }
+
+    /// Returns the encoded master public key recovered from ciphertext.
+    #[must_use]
+    pub const fn encoded_master_public_key(&self) -> &MasterPublicKey {
+        &self.encoded_master_public_key
+    }
+}
+
 /// Typed non-negative UTXO leaf index used in nullifier derivation.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct LeafIndex(u64);
@@ -257,10 +433,13 @@ impl Nullifier {
 #[cfg(test)]
 mod tests {
     use super::{
-        LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, NotePublicKey, NoteRandom, NoteValue, Nullifier,
-        SenderRandom, SenderVisibility, SharedRandom,
+        LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment, NoteParty, NotePerspective,
+        NotePublicKey, NoteRandom, NoteValue, Nullifier, ReconstructedNote, SenderRandom,
+        SenderVisibility, SharedRandom,
     };
-    use crate::{ParseDomainError, bn254_scalar_field_modulus};
+    use crate::{
+        MasterPublicKey, ParseDomainError, TokenHash, ViewingPublicKey, bn254_scalar_field_modulus,
+    };
 
     #[test]
     fn rejects_invalid_note_random_length() {
@@ -344,5 +523,72 @@ mod tests {
     #[test]
     fn sender_visibility_variants_are_distinct() {
         assert_ne!(SenderVisibility::Visible, SenderVisibility::Hidden);
+    }
+
+    #[test]
+    fn note_party_preserves_keys() {
+        let master_public_key = MasterPublicKey::new(1_u8.into())
+            .unwrap_or_else(|error| panic!("master public key should validate: {error}"));
+        let viewing_public_key = ViewingPublicKey::new([2_u8; 32]);
+        let party = NoteParty::new(master_public_key.clone(), viewing_public_key);
+
+        assert_eq!(party.master_public_key(), &master_public_key);
+        assert_eq!(party.viewing_public_key(), &viewing_public_key);
+    }
+
+    #[test]
+    fn note_and_reconstructed_note_preserve_canonical_fields() {
+        let receiver = NoteParty::new(
+            MasterPublicKey::new(1_u8.into()).unwrap_or_else(|error| {
+                panic!("receiver master public key should validate: {error}")
+            }),
+            ViewingPublicKey::new([2_u8; 32]),
+        );
+        let sender = NoteParty::new(
+            MasterPublicKey::new(3_u8.into()).unwrap_or_else(|error| {
+                panic!("sender master public key should validate: {error}")
+            }),
+            ViewingPublicKey::new([4_u8; 32]),
+        );
+        let encoded_master_public_key = MasterPublicKey::new(5_u8.into())
+            .unwrap_or_else(|error| panic!("encoded master public key should validate: {error}"));
+        let token_hash = TokenHash::new([6_u8; 32]);
+        let random = NoteRandom::new([7_u8; 16]);
+        let value = NoteValue::new(8_u128);
+        let sender_random = SenderRandom::new([9_u8; 15]);
+        let note_public_key = NotePublicKey::new(10_u8.into())
+            .unwrap_or_else(|error| panic!("note public key should validate: {error}"));
+        let commitment = NoteCommitment::new(11_u8.into())
+            .unwrap_or_else(|error| panic!("commitment should validate: {error}"));
+        let note = Note::new(
+            receiver.clone(),
+            Some(sender.clone()),
+            token_hash,
+            random,
+            value,
+            Some(sender_random),
+            b"memo".to_vec(),
+            note_public_key.clone(),
+            commitment.clone(),
+        );
+
+        assert_eq!(note.receiver(), &receiver);
+        assert_eq!(note.sender(), Some(&sender));
+        assert_eq!(note.random(), &random);
+        assert_eq!(note.value(), value);
+        assert_eq!(note.sender_random(), Some(&sender_random));
+        assert_eq!(note.memo(), b"memo");
+        assert_eq!(note.note_public_key(), &note_public_key);
+        assert_eq!(note.commitment(), &commitment);
+
+        let reconstructed = ReconstructedNote::new(
+            note.clone(),
+            NotePerspective::Sent,
+            encoded_master_public_key.clone(),
+        );
+
+        assert_eq!(reconstructed.note(), &note);
+        assert_eq!(reconstructed.perspective(), NotePerspective::Sent);
+        assert_eq!(reconstructed.encoded_master_public_key(), &encoded_master_public_key);
     }
 }

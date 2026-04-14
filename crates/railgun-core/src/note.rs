@@ -5,11 +5,61 @@ use ark_ff::{BigInteger, PrimeField};
 use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
 use railgun_types::{
-    LeafIndex, MasterPublicKey, NoteCommitment, NotePublicKey, NoteRandom, NoteValue, Nullifier,
-    NullifyingKey, SenderRandom, SenderVisibility, TokenHash,
+    BlindedViewingPublicKey, LeafIndex, MasterPublicKey, Note, NoteCommitment, NoteParty,
+    NotePerspective, NotePublicKey, NoteRandom, NoteValue, Nullifier, NullifyingKey,
+    ReconstructedNote, SenderRandom, SenderVisibility, SharedRandom, TokenHash, V2Plaintext,
+    V3Plaintext,
 };
 
-use crate::hd::KeyDerivationError;
+use crate::{blinding::BlindingError, hd::KeyDerivationError, unblind_note_key};
+
+/// Error returned when note reconstruction or validation fails.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NoteReconstructionError {
+    /// The sender random required to reconstruct a V2 sent note was not provided.
+    MissingV2SentSenderRandom,
+    /// A viewing key could not be unblinded from the ciphertext metadata.
+    InvalidBlindedViewingKey,
+    /// The recovered master public key did not validate.
+    InvalidMasterPublicKey,
+    /// Note-public-key or commitment derivation failed unexpectedly.
+    DerivationFailed,
+    /// The recomputed commitment does not match the expected on-chain leaf.
+    CommitmentMismatch,
+}
+
+impl core::fmt::Display for NoteReconstructionError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::MissingV2SentSenderRandom => {
+                formatter.write_str("v2 sent-note reconstruction requires sender random")
+            }
+            Self::InvalidBlindedViewingKey => formatter.write_str("invalid blinded viewing key"),
+            Self::InvalidMasterPublicKey => formatter.write_str("invalid master public key"),
+            Self::DerivationFailed => formatter.write_str("failed to derive note fields"),
+            Self::CommitmentMismatch => {
+                formatter.write_str("recomputed commitment does not match expected commitment")
+            }
+        }
+    }
+}
+
+impl std::error::Error for NoteReconstructionError {}
+
+impl From<KeyDerivationError> for NoteReconstructionError {
+    fn from(_: KeyDerivationError) -> Self {
+        Self::DerivationFailed
+    }
+}
+
+impl From<BlindingError> for NoteReconstructionError {
+    fn from(error: BlindingError) -> Self {
+        match error {
+            BlindingError::InvalidViewingPublicKey
+            | BlindingError::InvalidBlindedViewingPublicKey => Self::InvalidBlindedViewingKey,
+        }
+    }
+}
 
 fn biguint_to_bn254_field(value: &BigUint) -> Result<Fr, KeyDerivationError> {
     let bytes = value.to_bytes_be();
@@ -55,6 +105,35 @@ pub fn encode_master_public_key(
                     ^ sender_master_public_key.to_be_bytes()[index]
             });
             MasterPublicKey::new(BigUint::from_bytes_be(&encoded_bytes))
+                .map_err(|_| KeyDerivationError::DerivationFailure)
+        }
+    }
+}
+
+/// Decodes a note master public key according to sender visibility rules.
+///
+/// Hidden-sender notes carry the receiver MPK directly. Visible-sender notes XOR
+/// the current wallet MPK with the encoded MPK to recover the counterparty key.
+///
+/// # Errors
+///
+/// Returns an error if the recovered master public key does not fit the canonical
+/// 32-byte MPK encoding.
+pub fn decode_master_public_key(
+    current_wallet_master_public_key: &MasterPublicKey,
+    encoded_master_public_key: &MasterPublicKey,
+    sender_random: Option<&SenderRandom>,
+) -> Result<MasterPublicKey, KeyDerivationError> {
+    match sender_visibility(sender_random) {
+        SenderVisibility::Hidden => MasterPublicKey::new(encoded_master_public_key.value().clone())
+            .map_err(|_| KeyDerivationError::DerivationFailure),
+        SenderVisibility::Visible => {
+            // Upstream visibility decoding XORs the canonical fixed-width encodings.
+            let decoded_bytes: [u8; 32] = core::array::from_fn(|index| {
+                current_wallet_master_public_key.to_be_bytes()[index]
+                    ^ encoded_master_public_key.to_be_bytes()[index]
+            });
+            MasterPublicKey::new(BigUint::from_bytes_be(&decoded_bytes))
                 .map_err(|_| KeyDerivationError::DerivationFailure)
         }
     }
@@ -112,6 +191,232 @@ pub fn derive_note_commitment(
         .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
+/// Recomputes a note public key and commitment, rejecting mismatches.
+///
+/// # Errors
+///
+/// Returns an error if derivation fails or if the recomputed commitment does not
+/// match `expected_commitment`.
+pub fn validate_note_commitment(
+    receiver_master_public_key: &MasterPublicKey,
+    random: &NoteRandom,
+    token_hash: &TokenHash,
+    value: NoteValue,
+    expected_commitment: &NoteCommitment,
+) -> Result<(NotePublicKey, NoteCommitment), NoteReconstructionError> {
+    let note_public_key = derive_note_public_key(receiver_master_public_key, random)?;
+    let commitment = derive_note_commitment(&note_public_key, token_hash, value)?;
+
+    if &commitment != expected_commitment {
+        return Err(NoteReconstructionError::CommitmentMismatch);
+    }
+
+    Ok((note_public_key, commitment))
+}
+
+fn shared_random_from_note_random(random: &NoteRandom) -> SharedRandom {
+    SharedRandom::new(*random.as_bytes())
+}
+
+struct ReconstructionInputs<'a> {
+    wallet: &'a NoteParty,
+    encoded_master_public_key: &'a MasterPublicKey,
+    token_hash: &'a TokenHash,
+    random: &'a NoteRandom,
+    value: NoteValue,
+    sender_random: Option<SenderRandom>,
+    memo: Vec<u8>,
+    expected_commitment: &'a NoteCommitment,
+}
+
+fn reconstruct_received_note(
+    inputs: ReconstructionInputs<'_>,
+    blinded_sender_viewing_key: &BlindedViewingPublicKey,
+) -> Result<ReconstructedNote, NoteReconstructionError> {
+    let receiver = inputs.wallet.clone();
+    let shared_random = shared_random_from_note_random(inputs.random);
+    let sender = match inputs.sender_random {
+        Some(sender_random) if !sender_random.is_null_sentinel() => None,
+        _ if inputs.encoded_master_public_key == inputs.wallet.master_public_key() => None,
+        _ => {
+            let visible_sender_random = SenderRandom::null_sentinel();
+            let sender_master_public_key = decode_master_public_key(
+                inputs.wallet.master_public_key(),
+                inputs.encoded_master_public_key,
+                Some(&visible_sender_random),
+            )
+            .map_err(|_| NoteReconstructionError::InvalidMasterPublicKey)?;
+            let sender_viewing_public_key = unblind_note_key(
+                blinded_sender_viewing_key,
+                &shared_random,
+                &visible_sender_random,
+            )?;
+
+            Some(NoteParty::new(sender_master_public_key, sender_viewing_public_key))
+        }
+    };
+    let (note_public_key, commitment) = validate_note_commitment(
+        receiver.master_public_key(),
+        inputs.random,
+        inputs.token_hash,
+        inputs.value,
+        inputs.expected_commitment,
+    )?;
+
+    let note = Note::new(
+        receiver,
+        sender,
+        *inputs.token_hash,
+        *inputs.random,
+        inputs.value,
+        inputs.sender_random,
+        inputs.memo,
+        note_public_key,
+        commitment,
+    );
+
+    Ok(ReconstructedNote::new(
+        note,
+        NotePerspective::Received,
+        inputs.encoded_master_public_key.clone(),
+    ))
+}
+
+fn reconstruct_sent_note(
+    inputs: ReconstructionInputs<'_>,
+    blinded_receiver_viewing_key: &BlindedViewingPublicKey,
+) -> Result<ReconstructedNote, NoteReconstructionError> {
+    let sender_random =
+        inputs.sender_random.ok_or(NoteReconstructionError::MissingV2SentSenderRandom)?;
+    let shared_random = shared_random_from_note_random(inputs.random);
+    let receiver_master_public_key = decode_master_public_key(
+        inputs.wallet.master_public_key(),
+        inputs.encoded_master_public_key,
+        Some(&sender_random),
+    )
+    .map_err(|_| NoteReconstructionError::InvalidMasterPublicKey)?;
+    let receiver_viewing_public_key =
+        unblind_note_key(blinded_receiver_viewing_key, &shared_random, &sender_random)?;
+    let receiver = NoteParty::new(receiver_master_public_key, receiver_viewing_public_key);
+    let (note_public_key, commitment) = validate_note_commitment(
+        receiver.master_public_key(),
+        inputs.random,
+        inputs.token_hash,
+        inputs.value,
+        inputs.expected_commitment,
+    )?;
+
+    let note = Note::new(
+        receiver,
+        Some(inputs.wallet.clone()),
+        *inputs.token_hash,
+        *inputs.random,
+        inputs.value,
+        Some(sender_random),
+        inputs.memo,
+        note_public_key,
+        commitment,
+    );
+
+    Ok(ReconstructedNote::new(
+        note,
+        NotePerspective::Sent,
+        inputs.encoded_master_public_key.clone(),
+    ))
+}
+
+/// Reconstructs and validates a canonical V2 note from decrypted plaintext.
+///
+/// V2 sent-note reconstruction requires the caller to provide the decrypted
+/// annotation sender-random, because V2 plaintext does not carry it directly.
+///
+/// # Errors
+///
+/// Returns an error if reconstruction inputs are inconsistent, a blinded viewing
+/// key cannot be unblinded, or the recomputed commitment mismatches.
+pub fn reconstruct_v2_note(
+    plaintext: &V2Plaintext,
+    wallet: &NoteParty,
+    blinded_sender_viewing_key: &BlindedViewingPublicKey,
+    blinded_receiver_viewing_key: &BlindedViewingPublicKey,
+    perspective: NotePerspective,
+    sender_random: Option<SenderRandom>,
+    expected_commitment: &NoteCommitment,
+) -> Result<ReconstructedNote, NoteReconstructionError> {
+    match perspective {
+        NotePerspective::Received => reconstruct_received_note(
+            ReconstructionInputs {
+                wallet,
+                encoded_master_public_key: plaintext.encoded_master_public_key(),
+                token_hash: plaintext.token_hash(),
+                random: plaintext.random(),
+                value: plaintext.value(),
+                sender_random: None,
+                memo: plaintext.memo().to_vec(),
+                expected_commitment,
+            },
+            blinded_sender_viewing_key,
+        ),
+        NotePerspective::Sent => reconstruct_sent_note(
+            ReconstructionInputs {
+                wallet,
+                encoded_master_public_key: plaintext.encoded_master_public_key(),
+                token_hash: plaintext.token_hash(),
+                random: plaintext.random(),
+                value: plaintext.value(),
+                sender_random,
+                memo: plaintext.memo().to_vec(),
+                expected_commitment,
+            },
+            blinded_receiver_viewing_key,
+        ),
+    }
+}
+
+/// Reconstructs and validates a canonical V3 note from decrypted plaintext.
+///
+/// # Errors
+///
+/// Returns an error if reconstruction inputs are inconsistent, a blinded viewing
+/// key cannot be unblinded, or the recomputed commitment mismatches.
+pub fn reconstruct_v3_note(
+    plaintext: &V3Plaintext,
+    wallet: &NoteParty,
+    blinded_sender_viewing_key: &BlindedViewingPublicKey,
+    blinded_receiver_viewing_key: &BlindedViewingPublicKey,
+    perspective: NotePerspective,
+    expected_commitment: &NoteCommitment,
+) -> Result<ReconstructedNote, NoteReconstructionError> {
+    match perspective {
+        NotePerspective::Received => reconstruct_received_note(
+            ReconstructionInputs {
+                wallet,
+                encoded_master_public_key: plaintext.encoded_master_public_key(),
+                token_hash: plaintext.token_hash(),
+                random: plaintext.random(),
+                value: plaintext.value(),
+                sender_random: Some(*plaintext.sender_random()),
+                memo: plaintext.memo().to_vec(),
+                expected_commitment,
+            },
+            blinded_sender_viewing_key,
+        ),
+        NotePerspective::Sent => reconstruct_sent_note(
+            ReconstructionInputs {
+                wallet,
+                encoded_master_public_key: plaintext.encoded_master_public_key(),
+                token_hash: plaintext.token_hash(),
+                random: plaintext.random(),
+                value: plaintext.value(),
+                sender_random: Some(*plaintext.sender_random()),
+                memo: plaintext.memo().to_vec(),
+                expected_commitment,
+            },
+            blinded_receiver_viewing_key,
+        ),
+    }
+}
+
 /// Derives the canonical nullifier from a nullifying key and UTXO leaf index.
 ///
 /// Poseidon input ordering is exactly `[nullifying_key, leaf_index]`
@@ -138,15 +443,20 @@ pub fn derive_nullifier(
 mod tests {
     use num_bigint::BigUint;
     use railgun_types::{
-        LeafIndex, MasterPublicKey, NotePublicKey, NoteRandom, NoteValue, NullifyingKey,
-        SenderRandom, SenderVisibility, TokenHash,
+        BlindedViewingPublicKey, LeafIndex, MasterPublicKey, NoteCommitment, NoteParty,
+        NotePerspective, NotePublicKey, NoteRandom, NoteValue, NullifyingKey, SenderRandom,
+        SenderVisibility, SharedRandom, TokenHash, V2Plaintext, V3Plaintext, ViewingPrivateKey,
     };
 
     use super::{
-        derive_note_commitment, derive_note_public_key, derive_nullifier, encode_master_public_key,
-        sender_visibility,
+        NoteReconstructionError, decode_master_public_key, derive_note_commitment,
+        derive_note_public_key, derive_nullifier, encode_master_public_key, reconstruct_v2_note,
+        reconstruct_v3_note, sender_visibility, validate_note_commitment,
     };
-    use crate::{derive_nullifying_key_from_bytes, hd::KeyDerivationError};
+    use crate::{
+        derive_note_blinding_keys, derive_nullifying_key_from_bytes, derive_viewing_public_key,
+        hd::KeyDerivationError,
+    };
 
     fn decode_hex<const N: usize>(value: &str) -> [u8; N] {
         let trimmed = value.strip_prefix("0x").unwrap_or(value);
@@ -172,6 +482,29 @@ mod tests {
                 .unwrap_or_else(|| panic!("master public key should parse")),
         )
         .unwrap_or_else(|error| panic!("master public key should validate: {error}"))
+    }
+
+    fn note_party(master_public_key_decimal: &str, viewing_private_key_hex: &str) -> NoteParty {
+        let viewing_private_key = ViewingPrivateKey::new(decode_hex(viewing_private_key_hex));
+        NoteParty::new(
+            master_public_key(master_public_key_decimal),
+            derive_viewing_public_key(&viewing_private_key),
+        )
+    }
+
+    fn compute_blinded_keys(
+        sender: &NoteParty,
+        receiver: &NoteParty,
+        random: &NoteRandom,
+        sender_random: &SenderRandom,
+    ) -> (BlindedViewingPublicKey, BlindedViewingPublicKey) {
+        derive_note_blinding_keys(
+            sender.viewing_public_key(),
+            receiver.viewing_public_key(),
+            &SharedRandom::new(*random.as_bytes()),
+            sender_random,
+        )
+        .unwrap_or_else(|error| panic!("note blinding should succeed: {error}"))
     }
 
     #[test]
@@ -470,6 +803,388 @@ mod tests {
             .unwrap_or_else(|error| panic!("swapped derivation should succeed: {error}"));
 
         assert_ne!(ordered, swapped);
+    }
+
+    #[test]
+    fn decodes_visible_sender_master_public_key() {
+        let receiver_master_public_key = master_public_key(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+        );
+        let sender_master_public_key = master_public_key("123456789");
+        let encoded = encode_master_public_key(
+            &receiver_master_public_key,
+            &sender_master_public_key,
+            Some(&SenderRandom::null_sentinel()),
+        )
+        .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}"));
+
+        let decoded = decode_master_public_key(
+            &receiver_master_public_key,
+            &encoded,
+            Some(&SenderRandom::null_sentinel()),
+        )
+        .unwrap_or_else(|error| panic!("decoded master public key should derive: {error}"));
+
+        assert_eq!(decoded, sender_master_public_key);
+    }
+
+    #[test]
+    fn validates_note_commitment_against_issue_vector() {
+        let receiver_master_public_key = master_public_key(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+        );
+        let random = NoteRandom::new(decode_hex("67c600e777b86d3a1e72a53092e9fe85"));
+        let token_hash = TokenHash::new(decode_hex(
+            "0000000000000000000000009fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        ));
+        let value = NoteValue::new(109_725_000_000_000_000_000_000_u128);
+        let expected_commitment = NoteCommitment::new(
+            BigUint::parse_bytes(
+                b"6442080113031815261226726790601252395803415545769290265212232865825296902085",
+                10,
+            )
+            .unwrap_or_else(|| panic!("commitment should parse")),
+        )
+        .unwrap_or_else(|error| panic!("commitment should validate: {error}"));
+
+        let (note_public_key, commitment) = validate_note_commitment(
+            &receiver_master_public_key,
+            &random,
+            &token_hash,
+            value,
+            &expected_commitment,
+        )
+        .unwrap_or_else(|error| panic!("commitment should validate: {error}"));
+
+        assert_eq!(
+            note_public_key.value(),
+            &BigUint::parse_bytes(
+                b"6401386539363233023821237080626891507664131047949709897410333742190241828916",
+                10,
+            )
+            .unwrap_or_else(|| panic!("note public key should parse"))
+        );
+        assert_eq!(commitment, expected_commitment);
+    }
+
+    #[test]
+    fn reconstructs_v2_received_note_with_visible_sender() {
+        let sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let random = NoteRandom::new(decode_hex("85b08a7cd73ee433072f1d410aeb4801"));
+        let sender_random = SenderRandom::null_sentinel();
+        let token_hash = TokenHash::new(decode_hex(
+            "0000000000000000000000007f4925cdf66ddf5b88016df1fe915e68eff8f192",
+        ));
+        let value = NoteValue::new(0x086a_a1ad_e61c_cb53);
+        let encoded_master_public_key = encode_master_public_key(
+            receiver.master_public_key(),
+            sender.master_public_key(),
+            Some(&sender_random),
+        )
+        .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}"));
+        let plaintext = V2Plaintext::new(
+            encoded_master_public_key,
+            token_hash,
+            random,
+            value,
+            b"visible-v2".to_vec(),
+        );
+        let (blinded_sender_viewing_key, blinded_receiver_viewing_key) =
+            compute_blinded_keys(&sender, &receiver, &random, &sender_random);
+        let expected_commitment = derive_note_commitment(
+            &derive_note_public_key(receiver.master_public_key(), &random)
+                .unwrap_or_else(|error| panic!("note public key should derive: {error}")),
+            &token_hash,
+            value,
+        )
+        .unwrap_or_else(|error| panic!("commitment should derive: {error}"));
+
+        let reconstructed = reconstruct_v2_note(
+            &plaintext,
+            &receiver,
+            &blinded_sender_viewing_key,
+            &blinded_receiver_viewing_key,
+            NotePerspective::Received,
+            None,
+            &expected_commitment,
+        )
+        .unwrap_or_else(|error| panic!("v2 received reconstruction should succeed: {error}"));
+
+        assert_eq!(reconstructed.note().receiver(), &receiver);
+        assert_eq!(reconstructed.note().sender(), Some(&sender));
+        assert_eq!(reconstructed.note().sender_random(), None);
+        assert_eq!(reconstructed.note().memo(), b"visible-v2");
+        assert_eq!(reconstructed.note().commitment(), &expected_commitment);
+    }
+
+    #[test]
+    fn reconstructs_v2_sent_note_with_hidden_sender() {
+        let sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let random = NoteRandom::new(decode_hex("22222222222222222222222222222222"));
+        let sender_random = SenderRandom::new(decode_hex("86727859e3fe7c0d81e27dfafaf0d9"));
+        let token_hash = TokenHash::new(decode_hex(
+            "0000000000000000000000009fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        ));
+        let value = NoteValue::new(0x0003_635c_9adc_5dea_0000);
+        let encoded_master_public_key = encode_master_public_key(
+            receiver.master_public_key(),
+            sender.master_public_key(),
+            Some(&sender_random),
+        )
+        .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}"));
+        let plaintext = V2Plaintext::new(
+            encoded_master_public_key,
+            token_hash,
+            random,
+            value,
+            b"hidden-v2".to_vec(),
+        );
+        let (blinded_sender_viewing_key, blinded_receiver_viewing_key) =
+            compute_blinded_keys(&sender, &receiver, &random, &sender_random);
+        let expected_commitment = derive_note_commitment(
+            &derive_note_public_key(receiver.master_public_key(), &random)
+                .unwrap_or_else(|error| panic!("note public key should derive: {error}")),
+            &token_hash,
+            value,
+        )
+        .unwrap_or_else(|error| panic!("commitment should derive: {error}"));
+
+        let reconstructed = reconstruct_v2_note(
+            &plaintext,
+            &sender,
+            &blinded_sender_viewing_key,
+            &blinded_receiver_viewing_key,
+            NotePerspective::Sent,
+            Some(sender_random),
+            &expected_commitment,
+        )
+        .unwrap_or_else(|error| panic!("v2 sent reconstruction should succeed: {error}"));
+
+        assert_eq!(reconstructed.note().receiver(), &receiver);
+        assert_eq!(reconstructed.note().sender(), Some(&sender));
+        assert_eq!(reconstructed.note().sender_random(), Some(&sender_random));
+        assert_eq!(reconstructed.note().memo(), b"hidden-v2");
+    }
+
+    #[test]
+    fn v2_sent_note_requires_sender_random() {
+        let sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let random = NoteRandom::new([7_u8; NoteRandom::LENGTH]);
+        let sender_random = SenderRandom::null_sentinel();
+        let token_hash = TokenHash::new([8_u8; TokenHash::LENGTH]);
+        let value = NoteValue::new(9_u128);
+        let plaintext = V2Plaintext::new(
+            encode_master_public_key(
+                receiver.master_public_key(),
+                sender.master_public_key(),
+                Some(&sender_random),
+            )
+            .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}")),
+            token_hash,
+            random,
+            value,
+            Vec::new(),
+        );
+        let (blinded_sender_viewing_key, blinded_receiver_viewing_key) =
+            compute_blinded_keys(&sender, &receiver, &random, &sender_random);
+        let expected_commitment = derive_note_commitment(
+            &derive_note_public_key(receiver.master_public_key(), &random)
+                .unwrap_or_else(|error| panic!("note public key should derive: {error}")),
+            &token_hash,
+            value,
+        )
+        .unwrap_or_else(|error| panic!("commitment should derive: {error}"));
+
+        let Err(error) = reconstruct_v2_note(
+            &plaintext,
+            &sender,
+            &blinded_sender_viewing_key,
+            &blinded_receiver_viewing_key,
+            NotePerspective::Sent,
+            None,
+            &expected_commitment,
+        ) else {
+            panic!("v2 sent reconstruction without sender random should fail");
+        };
+
+        assert_eq!(error, NoteReconstructionError::MissingV2SentSenderRandom);
+    }
+
+    #[test]
+    fn reconstructs_v3_received_note_with_hidden_sender() {
+        let sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let random = NoteRandom::new(decode_hex("85b08a7cd73ee433072f1d410aeb4801"));
+        let sender_random = SenderRandom::new(decode_hex("222222222222222222222222222222"));
+        let token_hash = TokenHash::new(decode_hex(
+            "0000000000000000000000007f4925cdf66ddf5b88016df1fe915e68eff8f192",
+        ));
+        let value = NoteValue::new(0x086a_a1ad_e61c_cb53);
+        let plaintext = V3Plaintext::new(
+            encode_master_public_key(
+                receiver.master_public_key(),
+                sender.master_public_key(),
+                Some(&sender_random),
+            )
+            .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}")),
+            random,
+            value,
+            token_hash,
+            sender_random,
+            b"hidden-v3".to_vec(),
+        );
+        let (blinded_sender_viewing_key, blinded_receiver_viewing_key) =
+            compute_blinded_keys(&sender, &receiver, &random, &sender_random);
+        let expected_commitment = derive_note_commitment(
+            &derive_note_public_key(receiver.master_public_key(), &random)
+                .unwrap_or_else(|error| panic!("note public key should derive: {error}")),
+            &token_hash,
+            value,
+        )
+        .unwrap_or_else(|error| panic!("commitment should derive: {error}"));
+
+        let reconstructed = reconstruct_v3_note(
+            &plaintext,
+            &receiver,
+            &blinded_sender_viewing_key,
+            &blinded_receiver_viewing_key,
+            NotePerspective::Received,
+            &expected_commitment,
+        )
+        .unwrap_or_else(|error| panic!("v3 received reconstruction should succeed: {error}"));
+
+        assert_eq!(reconstructed.note().receiver(), &receiver);
+        assert_eq!(reconstructed.note().sender(), None);
+        assert_eq!(reconstructed.note().sender_random(), Some(&sender_random));
+        assert_eq!(reconstructed.note().memo(), b"hidden-v3");
+    }
+
+    #[test]
+    fn reconstructs_v3_sent_note_with_visible_sender() {
+        let sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let random = NoteRandom::new(decode_hex("11111111111111111111111111111111"));
+        let sender_random = SenderRandom::null_sentinel();
+        let token_hash = TokenHash::new(decode_hex(
+            "0000000000000000000000009fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        ));
+        let value = NoteValue::new(1_000_000_u128);
+        let plaintext = V3Plaintext::new(
+            encode_master_public_key(
+                receiver.master_public_key(),
+                sender.master_public_key(),
+                Some(&sender_random),
+            )
+            .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}")),
+            random,
+            value,
+            token_hash,
+            sender_random,
+            b"visible-v3".to_vec(),
+        );
+        let (blinded_sender_viewing_key, blinded_receiver_viewing_key) =
+            compute_blinded_keys(&sender, &receiver, &random, &sender_random);
+        let expected_commitment = derive_note_commitment(
+            &derive_note_public_key(receiver.master_public_key(), &random)
+                .unwrap_or_else(|error| panic!("note public key should derive: {error}")),
+            &token_hash,
+            value,
+        )
+        .unwrap_or_else(|error| panic!("commitment should derive: {error}"));
+
+        let reconstructed = reconstruct_v3_note(
+            &plaintext,
+            &sender,
+            &blinded_sender_viewing_key,
+            &blinded_receiver_viewing_key,
+            NotePerspective::Sent,
+            &expected_commitment,
+        )
+        .unwrap_or_else(|error| panic!("v3 sent reconstruction should succeed: {error}"));
+
+        assert_eq!(reconstructed.note().receiver(), &receiver);
+        assert_eq!(reconstructed.note().sender(), Some(&sender));
+        assert_eq!(reconstructed.note().sender_random(), Some(&sender_random));
+        assert_eq!(reconstructed.note().memo(), b"visible-v3");
+    }
+
+    #[test]
+    fn rejects_commitment_mismatch_during_reconstruction() {
+        let sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let random = NoteRandom::new([5_u8; NoteRandom::LENGTH]);
+        let sender_random = SenderRandom::null_sentinel();
+        let token_hash = TokenHash::new([6_u8; TokenHash::LENGTH]);
+        let value = NoteValue::new(7_u128);
+        let plaintext = V3Plaintext::new(
+            encode_master_public_key(
+                receiver.master_public_key(),
+                sender.master_public_key(),
+                Some(&sender_random),
+            )
+            .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}")),
+            random,
+            value,
+            token_hash,
+            sender_random,
+            Vec::new(),
+        );
+        let (blinded_sender_viewing_key, blinded_receiver_viewing_key) =
+            compute_blinded_keys(&sender, &receiver, &random, &sender_random);
+        let wrong_commitment = NoteCommitment::new(BigUint::from(1_u8))
+            .unwrap_or_else(|error| panic!("wrong commitment should validate: {error}"));
+
+        let Err(error) = reconstruct_v3_note(
+            &plaintext,
+            &receiver,
+            &blinded_sender_viewing_key,
+            &blinded_receiver_viewing_key,
+            NotePerspective::Received,
+            &wrong_commitment,
+        ) else {
+            panic!("reconstruction with wrong commitment should fail");
+        };
+
+        assert_eq!(error, NoteReconstructionError::CommitmentMismatch);
     }
 
     #[test]
