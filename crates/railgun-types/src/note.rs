@@ -498,12 +498,100 @@ impl Nullifier {
     }
 }
 
+/// Nullifier linkage stored for a locally tracked note.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrackedNoteNullifier {
+    nullifier: Nullifier,
+    tree_number: Option<u16>,
+}
+
+impl TrackedNoteNullifier {
+    /// Creates a tracked-note nullifier record.
+    #[must_use]
+    pub const fn new(nullifier: Nullifier, tree_number: Option<u16>) -> Self {
+        Self { nullifier, tree_number }
+    }
+
+    /// Returns the tracked note nullifier.
+    #[must_use]
+    pub const fn nullifier(&self) -> &Nullifier {
+        &self.nullifier
+    }
+
+    /// Returns the tracked note tree number when known.
+    #[must_use]
+    pub const fn tree_number(&self) -> Option<u16> {
+        self.tree_number
+    }
+}
+
+/// Emitted nullifier event data used for spent-note detection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmittedNullifier {
+    nullifier: Nullifier,
+    tree_number: Option<u16>,
+}
+
+impl EmittedNullifier {
+    /// Creates an emitted-nullifier record.
+    #[must_use]
+    pub const fn new(nullifier: Nullifier, tree_number: Option<u16>) -> Self {
+        Self { nullifier, tree_number }
+    }
+
+    /// Returns the emitted nullifier.
+    #[must_use]
+    pub const fn nullifier(&self) -> &Nullifier {
+        &self.nullifier
+    }
+
+    /// Returns the emitted tree number when present on-chain.
+    #[must_use]
+    pub const fn tree_number(&self) -> Option<u16> {
+        self.tree_number
+    }
+}
+
+/// Deterministic spent-state result for one tracked note.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NoteSpentState {
+    is_spent: bool,
+    tree_number: Option<u16>,
+}
+
+impl NoteSpentState {
+    /// Creates an unspent-state result.
+    #[must_use]
+    pub const fn unspent() -> Self {
+        Self { is_spent: false, tree_number: None }
+    }
+
+    /// Creates a spent-state result with optional tree context.
+    #[must_use]
+    pub const fn spent(tree_number: Option<u16>) -> Self {
+        Self { is_spent: true, tree_number }
+    }
+
+    /// Returns whether the tracked note has been spent.
+    #[must_use]
+    pub const fn is_spent(&self) -> bool {
+        self.is_spent
+    }
+
+    /// Returns the matched tree number when known.
+    #[must_use]
+    pub const fn tree_number(&self) -> Option<u16> {
+        self.tree_number
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment, NoteParty, NotePerspective,
-        NotePublicKey, NoteRandom, NoteValue, Nullifier, ReconstructedNote, SenderRandom,
-        SenderRecovery, SenderVisibility, SharedRandom, WalletNoteOwnership,
+        EmittedNullifier, LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment,
+        NoteParty, NotePerspective, NotePublicKey, NoteRandom, NoteSpentState, NoteValue,
+        Nullifier, ReconstructedNote, SenderRandom, SenderRecovery, SenderVisibility, SharedRandom,
+        TrackedNoteNullifier, WalletNoteOwnership,
     };
     use crate::{
         MasterPublicKey, ParseDomainError, TokenHash, ViewingPublicKey, bn254_scalar_field_modulus,
@@ -617,6 +705,38 @@ mod tests {
 
         assert!(ownership.is_received_by_wallet());
         assert!(!ownership.is_sent_by_wallet());
+    }
+
+    #[test]
+    fn tracked_note_nullifier_preserves_nullifier_and_tree_number() {
+        let nullifier = Nullifier::new(1_u8.into())
+            .unwrap_or_else(|error| panic!("nullifier should validate: {error}"));
+        let tracked = TrackedNoteNullifier::new(nullifier.clone(), Some(7));
+
+        assert_eq!(tracked.nullifier(), &nullifier);
+        assert_eq!(tracked.tree_number(), Some(7));
+    }
+
+    #[test]
+    fn emitted_nullifier_preserves_nullifier_and_tree_number() {
+        let nullifier = Nullifier::new(2_u8.into())
+            .unwrap_or_else(|error| panic!("nullifier should validate: {error}"));
+        let emitted = EmittedNullifier::new(nullifier.clone(), Some(9));
+
+        assert_eq!(emitted.nullifier(), &nullifier);
+        assert_eq!(emitted.tree_number(), Some(9));
+    }
+
+    #[test]
+    fn note_spent_state_preserves_spent_flag_and_tree_number() {
+        let spent = NoteSpentState::spent(Some(5));
+        let unspent = NoteSpentState::unspent();
+
+        assert!(spent.is_spent());
+        assert_eq!(spent.tree_number(), Some(5));
+
+        assert!(!unspent.is_spent());
+        assert_eq!(unspent.tree_number(), None);
     }
 
     #[test]

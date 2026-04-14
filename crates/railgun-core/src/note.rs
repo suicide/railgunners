@@ -5,10 +5,11 @@ use ark_ff::{BigInteger, PrimeField};
 use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
 use railgun_types::{
-    BlindedViewingPublicKey, LeafIndex, MasterPublicKey, Note, NoteCommitment, NoteParty,
-    NotePerspective, NotePublicKey, NoteRandom, NoteValue, Nullifier, NullifyingKey,
-    ReconstructedNote, SenderRandom, SenderRecovery, SenderVisibility, SharedRandom, TokenHash,
-    V2Plaintext, V3Plaintext, WalletNoteOwnership, WalletScanKeyBundle,
+    BlindedViewingPublicKey, EmittedNullifier, LeafIndex, MasterPublicKey, Note, NoteCommitment,
+    NoteParty, NotePerspective, NotePublicKey, NoteRandom, NoteSpentState, NoteValue, Nullifier,
+    NullifyingKey, ReconstructedNote, SenderRandom, SenderRecovery, SenderVisibility, SharedRandom,
+    TokenHash, TrackedNoteNullifier, V2Plaintext, V3Plaintext, WalletNoteOwnership,
+    WalletScanKeyBundle,
 };
 
 use crate::{blinding::BlindingError, hd::KeyDerivationError, unblind_note_key};
@@ -508,21 +509,74 @@ pub fn derive_nullifier(
         .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
+/// Computes the tracked-note nullifier record from wallet scan keys and leaf metadata.
+///
+/// # Errors
+///
+/// Returns an error if canonical nullifier derivation fails unexpectedly.
+pub fn compute_tracked_note_nullifier(
+    scan_keys: &WalletScanKeyBundle,
+    leaf_index: LeafIndex,
+    tree_number: Option<u16>,
+) -> Result<TrackedNoteNullifier, KeyDerivationError> {
+    Ok(TrackedNoteNullifier::new(
+        derive_nullifier(scan_keys.nullifying_key(), leaf_index)?,
+        tree_number,
+    ))
+}
+
+/// Returns whether an emitted nullifier marks the tracked note as spent.
+///
+/// When both sides provide tree context, the tree number must also match. If one
+/// side lacks tree context, matching falls back to the canonical nullifier value.
+#[must_use]
+pub fn matches_emitted_nullifier(
+    tracked: &TrackedNoteNullifier,
+    emitted: &EmittedNullifier,
+) -> bool {
+    if tracked.nullifier() != emitted.nullifier() {
+        return false;
+    }
+
+    match (tracked.tree_number(), emitted.tree_number()) {
+        (Some(tracked_tree_number), Some(emitted_tree_number)) => {
+            tracked_tree_number == emitted_tree_number
+        }
+        _ => true,
+    }
+}
+
+/// Resolves the spent state for one tracked note against emitted nullifier events.
+#[must_use]
+pub fn spent_state_for_tracked_note(
+    tracked: &TrackedNoteNullifier,
+    emitted: &[EmittedNullifier],
+) -> NoteSpentState {
+    emitted
+        .iter()
+        .find(|candidate| matches_emitted_nullifier(tracked, candidate))
+        .map_or(NoteSpentState::unspent(), |matched| {
+            NoteSpentState::spent(matched.tree_number().or(tracked.tree_number()))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use num_bigint::BigUint;
     use railgun_types::{
-        BlindedViewingPublicKey, LeafIndex, MasterPublicKey, Note, NoteCommitment, NoteParty,
-        NotePerspective, NotePublicKey, NoteRandom, NoteValue, NullifyingKey, ReconstructedNote,
-        SenderRandom, SenderRecovery, SenderVisibility, SharedRandom, TokenHash, V2Plaintext,
-        V3Plaintext, ViewingPrivateKey, WalletNoteOwnership,
+        BlindedViewingPublicKey, EmittedNullifier, LeafIndex, MasterPublicKey, Note,
+        NoteCommitment, NoteParty, NotePerspective, NotePublicKey, NoteRandom, NoteSpentState,
+        NoteValue, Nullifier, NullifyingKey, ReconstructedNote, SenderRandom, SenderRecovery,
+        SenderVisibility, SharedRandom, TokenHash, TrackedNoteNullifier, V2Plaintext, V3Plaintext,
+        ViewingPrivateKey, WalletNoteOwnership,
     };
 
     use super::{
-        NoteReconstructionError, decode_master_public_key, derive_note_commitment,
-        derive_note_public_key, derive_nullifier, encode_master_public_key, is_received_by_wallet,
-        is_sent_by_wallet, reconstruct_v2_note, reconstruct_v3_note, recover_sender,
-        sender_visibility, validate_note_commitment, wallet_note_ownership,
+        NoteReconstructionError, compute_tracked_note_nullifier, decode_master_public_key,
+        derive_note_commitment, derive_note_public_key, derive_nullifier, encode_master_public_key,
+        is_received_by_wallet, is_sent_by_wallet, matches_emitted_nullifier, reconstruct_v2_note,
+        reconstruct_v3_note, recover_sender, sender_visibility, spent_state_for_tracked_note,
+        validate_note_commitment, wallet_note_ownership,
     };
     use crate::{
         build_wallet_scan_key_bundle, derive_note_blinding_keys, derive_nullifying_key_from_bytes,
@@ -710,6 +764,86 @@ mod tests {
             &BigUint::from_bytes_be(&decode_hex::<32>(
                 "091961ce11c244db49a25668e57dfa2b5ffb1fe63055dd64a14af6f2be58b0e7",
             ))
+        );
+    }
+
+    #[test]
+    fn computes_tracked_note_nullifier_from_scan_bundle() {
+        let bundle = build_wallet_scan_key_bundle(
+            ViewingPrivateKey::new([7_u8; 32]),
+            master_public_key("123456789"),
+        )
+        .unwrap_or_else(|error| panic!("scan bundle should build: {error}"));
+
+        let tracked = compute_tracked_note_nullifier(&bundle, LeafIndex::new(9), Some(2))
+            .unwrap_or_else(|error| panic!("tracked nullifier should compute: {error}"));
+        let expected = derive_nullifier(bundle.nullifying_key(), LeafIndex::new(9))
+            .unwrap_or_else(|error| panic!("nullifier should derive: {error}"));
+
+        assert_eq!(tracked, TrackedNoteNullifier::new(expected, Some(2)));
+    }
+
+    #[test]
+    fn matching_emitted_nullifier_marks_tracked_note_spent() {
+        let tracked = TrackedNoteNullifier::new(
+            Nullifier::new(BigUint::from_bytes_be(&decode_hex::<32>(
+                "03f68801f3ee2ed10178c162b4f7f1bd466bc9718f4f98175fc04934c5caba6e",
+            )))
+            .unwrap_or_else(|error| panic!("nullifier should validate: {error}")),
+            Some(4),
+        );
+        let emitted = [EmittedNullifier::new(tracked.nullifier().clone(), Some(4))];
+
+        assert!(matches_emitted_nullifier(&tracked, &emitted[0]));
+        assert_eq!(
+            spent_state_for_tracked_note(&tracked, &emitted),
+            NoteSpentState::spent(Some(4))
+        );
+    }
+
+    #[test]
+    fn non_matching_emitted_nullifier_keeps_tracked_note_unspent() {
+        let tracked = TrackedNoteNullifier::new(
+            Nullifier::new(BigUint::from_bytes_be(&decode_hex::<32>(
+                "03f68801f3ee2ed10178c162b4f7f1bd466bc9718f4f98175fc04934c5caba6e",
+            )))
+            .unwrap_or_else(|error| panic!("tracked nullifier should validate: {error}")),
+            Some(4),
+        );
+        let emitted = [EmittedNullifier::new(
+            Nullifier::new(BigUint::from_bytes_be(&decode_hex::<32>(
+                "1aeadb64bf8faff93dfe26bcf0b2e2d0e9724293cc7a455f028b6accabee13b8",
+            )))
+            .unwrap_or_else(|error| panic!("emitted nullifier should validate: {error}")),
+            Some(4),
+        )];
+
+        assert!(!matches_emitted_nullifier(&tracked, &emitted[0]));
+        assert_eq!(spent_state_for_tracked_note(&tracked, &emitted), NoteSpentState::unspent());
+    }
+
+    #[test]
+    fn tree_aware_matching_rejects_same_nullifier_with_different_tree_number() {
+        let nullifier = Nullifier::new(BigUint::from(1_u8))
+            .unwrap_or_else(|error| panic!("nullifier should validate: {error}"));
+        let tracked = TrackedNoteNullifier::new(nullifier.clone(), Some(1));
+        let emitted = EmittedNullifier::new(nullifier, Some(2));
+
+        assert!(!matches_emitted_nullifier(&tracked, &emitted));
+        assert_eq!(spent_state_for_tracked_note(&tracked, &[emitted]), NoteSpentState::unspent());
+    }
+
+    #[test]
+    fn missing_tree_context_falls_back_to_nullifier_only_matching() {
+        let nullifier = Nullifier::new(BigUint::from(1_u8))
+            .unwrap_or_else(|error| panic!("nullifier should validate: {error}"));
+        let tracked = TrackedNoteNullifier::new(nullifier.clone(), Some(7));
+        let emitted = EmittedNullifier::new(nullifier, None);
+
+        assert!(matches_emitted_nullifier(&tracked, &emitted));
+        assert_eq!(
+            spent_state_for_tracked_note(&tracked, &[emitted]),
+            NoteSpentState::spent(Some(7))
         );
     }
 

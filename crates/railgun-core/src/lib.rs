@@ -46,9 +46,10 @@ pub use keys::{
 };
 pub use network_id::{NetworkIdError, decode_network_id, encode_network_id};
 pub use note::{
-    NoteReconstructionError, decode_master_public_key, derive_note_commitment,
-    derive_note_public_key, derive_nullifier, encode_master_public_key, is_received_by_wallet,
-    is_sent_by_wallet, reconstruct_v2_note, reconstruct_v3_note, recover_sender, sender_visibility,
+    NoteReconstructionError, compute_tracked_note_nullifier, decode_master_public_key,
+    derive_note_commitment, derive_note_public_key, derive_nullifier, encode_master_public_key,
+    is_received_by_wallet, is_sent_by_wallet, matches_emitted_nullifier, reconstruct_v2_note,
+    reconstruct_v3_note, recover_sender, sender_visibility, spent_state_for_tracked_note,
     validate_note_commitment, wallet_note_ownership,
 };
 pub use shareable_viewing_key::{

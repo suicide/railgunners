@@ -28,9 +28,10 @@ pub use keys::{
     SpendingPublicKey, ViewingKeyPair, ViewingPrivateKey, ViewingPublicKey, WalletScanKeyBundle,
 };
 pub use note::{
-    LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment, NoteParty, NotePerspective,
-    NotePublicKey, NoteRandom, NoteValue, Nullifier, ReconstructedNote, SenderRandom,
-    SenderRecovery, SenderVisibility, SharedRandom, WalletNoteOwnership,
+    EmittedNullifier, LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment, NoteParty,
+    NotePerspective, NotePublicKey, NoteRandom, NoteSpentState, NoteValue, Nullifier,
+    ReconstructedNote, SenderRandom, SenderRecovery, SenderVisibility, SharedRandom,
+    TrackedNoteNullifier, WalletNoteOwnership,
 };
 pub use shield_ciphertext::{ShieldCiphertext, ShieldCiphertextBlock};
 pub use token::{Address, ChainId, TokenData, TokenHash, TokenSubId, TokenType, TxHash};
