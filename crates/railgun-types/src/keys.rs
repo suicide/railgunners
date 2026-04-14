@@ -350,6 +350,53 @@ impl MasterPublicKey {
     }
 }
 
+/// Canonical wallet scan-key bundle for note ownership and spent-note checks.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_field_names)]
+pub struct WalletScanKeyBundle {
+    viewing_private_key: ViewingPrivateKey,
+    viewing_public_key: ViewingPublicKey,
+    nullifying_key: NullifyingKey,
+    master_public_key: MasterPublicKey,
+}
+
+impl WalletScanKeyBundle {
+    /// Creates a scan-key bundle from explicit components.
+    #[must_use]
+    pub const fn new(
+        viewing_private_key: ViewingPrivateKey,
+        viewing_public_key: ViewingPublicKey,
+        nullifying_key: NullifyingKey,
+        master_public_key: MasterPublicKey,
+    ) -> Self {
+        Self { viewing_private_key, viewing_public_key, nullifying_key, master_public_key }
+    }
+
+    /// Returns the viewing private key.
+    #[must_use]
+    pub const fn viewing_private_key(&self) -> &ViewingPrivateKey {
+        &self.viewing_private_key
+    }
+
+    /// Returns the viewing public key.
+    #[must_use]
+    pub const fn viewing_public_key(&self) -> &ViewingPublicKey {
+        &self.viewing_public_key
+    }
+
+    /// Returns the nullifying key.
+    #[must_use]
+    pub const fn nullifying_key(&self) -> &NullifyingKey {
+        &self.nullifying_key
+    }
+
+    /// Returns the master public key.
+    #[must_use]
+    pub const fn master_public_key(&self) -> &MasterPublicKey {
+        &self.master_public_key
+    }
+}
+
 /// Typed 32-byte packed `BabyJubJub` spending public key.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct PackedSpendingPublicKey([u8; 32]);
@@ -420,7 +467,7 @@ mod tests {
     use super::{
         BlindedViewingPublicKey, MasterPublicKey, NullifyingKey, PackedSpendingPublicKey,
         SharedSymmetricKey, SpendingPrivateKey, SpendingPublicKey, ViewingPrivateKey,
-        ViewingPublicKey,
+        ViewingPublicKey, WalletScanKeyBundle,
     };
     use crate::{ParseDomainError, bn254_scalar_field_modulus};
 
@@ -476,6 +523,28 @@ mod tests {
             error,
             ParseDomainError::new("nullifying key must fit within the BN254 scalar field")
         );
+    }
+
+    #[test]
+    fn wallet_scan_key_bundle_preserves_components() {
+        let viewing_private_key = ViewingPrivateKey::new([1_u8; 32]);
+        let viewing_public_key = ViewingPublicKey::new([2_u8; 32]);
+        let nullifying_key = NullifyingKey::new(3_u8.into())
+            .unwrap_or_else(|error| panic!("nullifying key should validate: {error}"));
+        let master_public_key = MasterPublicKey::new(4_u8.into())
+            .unwrap_or_else(|error| panic!("master public key should validate: {error}"));
+
+        let bundle = WalletScanKeyBundle::new(
+            viewing_private_key,
+            viewing_public_key,
+            nullifying_key.clone(),
+            master_public_key.clone(),
+        );
+
+        assert_eq!(bundle.viewing_private_key(), &viewing_private_key);
+        assert_eq!(bundle.viewing_public_key(), &viewing_public_key);
+        assert_eq!(bundle.nullifying_key(), &nullifying_key);
+        assert_eq!(bundle.master_public_key(), &master_public_key);
     }
 
     #[test]

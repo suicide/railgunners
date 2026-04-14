@@ -8,7 +8,7 @@ use railgun_types::{
     BlindedViewingPublicKey, LeafIndex, MasterPublicKey, Note, NoteCommitment, NoteParty,
     NotePerspective, NotePublicKey, NoteRandom, NoteValue, Nullifier, NullifyingKey,
     ReconstructedNote, SenderRandom, SenderRecovery, SenderVisibility, SharedRandom, TokenHash,
-    V2Plaintext, V3Plaintext,
+    V2Plaintext, V3Plaintext, WalletNoteOwnership, WalletScanKeyBundle,
 };
 
 use crate::{blinding::BlindingError, hd::KeyDerivationError, unblind_note_key};
@@ -240,6 +240,35 @@ pub fn validate_note_commitment(
     }
 
     Ok((note_public_key, commitment))
+}
+
+/// Resolves whether a reconstructed note belongs to the wallet scan bundle.
+#[must_use]
+pub fn wallet_note_ownership(
+    scan_keys: &WalletScanKeyBundle,
+    note: &ReconstructedNote,
+) -> WalletNoteOwnership {
+    let wallet_master_public_key = scan_keys.master_public_key();
+    let is_received_by_wallet =
+        note.note().receiver().master_public_key() == wallet_master_public_key;
+    let is_sent_by_wallet = note
+        .note()
+        .sender()
+        .is_some_and(|sender| sender.master_public_key() == wallet_master_public_key);
+
+    WalletNoteOwnership::new(is_received_by_wallet, is_sent_by_wallet)
+}
+
+/// Returns whether the reconstructed note receiver matches the wallet bundle.
+#[must_use]
+pub fn is_received_by_wallet(scan_keys: &WalletScanKeyBundle, note: &ReconstructedNote) -> bool {
+    wallet_note_ownership(scan_keys, note).is_received_by_wallet()
+}
+
+/// Returns whether the reconstructed note sender matches the wallet bundle.
+#[must_use]
+pub fn is_sent_by_wallet(scan_keys: &WalletScanKeyBundle, note: &ReconstructedNote) -> bool {
+    wallet_note_ownership(scan_keys, note).is_sent_by_wallet()
 }
 
 fn shared_random_from_note_random(random: &NoteRandom) -> SharedRandom {
@@ -483,20 +512,21 @@ pub fn derive_nullifier(
 mod tests {
     use num_bigint::BigUint;
     use railgun_types::{
-        BlindedViewingPublicKey, LeafIndex, MasterPublicKey, NoteCommitment, NoteParty,
-        NotePerspective, NotePublicKey, NoteRandom, NoteValue, NullifyingKey, SenderRandom,
-        SenderRecovery, SenderVisibility, SharedRandom, TokenHash, V2Plaintext, V3Plaintext,
-        ViewingPrivateKey,
+        BlindedViewingPublicKey, LeafIndex, MasterPublicKey, Note, NoteCommitment, NoteParty,
+        NotePerspective, NotePublicKey, NoteRandom, NoteValue, NullifyingKey, ReconstructedNote,
+        SenderRandom, SenderRecovery, SenderVisibility, SharedRandom, TokenHash, V2Plaintext,
+        V3Plaintext, ViewingPrivateKey, WalletNoteOwnership,
     };
 
     use super::{
         NoteReconstructionError, decode_master_public_key, derive_note_commitment,
-        derive_note_public_key, derive_nullifier, encode_master_public_key, reconstruct_v2_note,
-        reconstruct_v3_note, recover_sender, sender_visibility, validate_note_commitment,
+        derive_note_public_key, derive_nullifier, encode_master_public_key, is_received_by_wallet,
+        is_sent_by_wallet, reconstruct_v2_note, reconstruct_v3_note, recover_sender,
+        sender_visibility, validate_note_commitment, wallet_note_ownership,
     };
     use crate::{
-        derive_note_blinding_keys, derive_nullifying_key_from_bytes, derive_viewing_public_key,
-        hd::KeyDerivationError,
+        build_wallet_scan_key_bundle, derive_note_blinding_keys, derive_nullifying_key_from_bytes,
+        derive_viewing_public_key, hd::KeyDerivationError,
     };
 
     fn decode_hex<const N: usize>(value: &str) -> [u8; N] {
@@ -974,6 +1004,182 @@ mod tests {
             .unwrap_or_else(|| panic!("note public key should parse"))
         );
         assert_eq!(commitment, expected_commitment);
+    }
+
+    #[test]
+    fn wallet_note_ownership_marks_matching_receiver() {
+        let wallet = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let other_sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let ownership = wallet_note_ownership(
+            &build_wallet_scan_key_bundle(
+                ViewingPrivateKey::new([9_u8; 32]),
+                wallet.master_public_key().clone(),
+            )
+            .unwrap_or_else(|error| panic!("scan bundle should build: {error}")),
+            &ReconstructedNote::new(
+                Note::new(
+                    wallet.clone(),
+                    Some(other_sender),
+                    TokenHash::new([1_u8; 32]),
+                    NoteRandom::new([2_u8; 16]),
+                    NoteValue::new(3_u128),
+                    None,
+                    Vec::new(),
+                    NotePublicKey::new(BigUint::from(4_u8))
+                        .unwrap_or_else(|error| panic!("note public key should validate: {error}")),
+                    NoteCommitment::new(BigUint::from(5_u8))
+                        .unwrap_or_else(|error| panic!("commitment should validate: {error}")),
+                ),
+                NotePerspective::Received,
+                wallet.master_public_key().clone(),
+            ),
+        );
+
+        assert_eq!(ownership, WalletNoteOwnership::new(true, false));
+        assert!(is_received_by_wallet(
+            &build_wallet_scan_key_bundle(
+                ViewingPrivateKey::new([9_u8; 32]),
+                wallet.master_public_key().clone(),
+            )
+            .unwrap_or_else(|error| panic!("scan bundle should build: {error}")),
+            &ReconstructedNote::new(
+                Note::new(
+                    wallet,
+                    None,
+                    TokenHash::new([1_u8; 32]),
+                    NoteRandom::new([2_u8; 16]),
+                    NoteValue::new(3_u128),
+                    None,
+                    Vec::new(),
+                    NotePublicKey::new(BigUint::from(4_u8))
+                        .unwrap_or_else(|error| panic!("note public key should validate: {error}")),
+                    NoteCommitment::new(BigUint::from(5_u8))
+                        .unwrap_or_else(|error| panic!("commitment should validate: {error}")),
+                ),
+                NotePerspective::Received,
+                MasterPublicKey::new(BigUint::from(0_u8))
+                    .unwrap_or_else(|error| panic!("encoded mpk should validate: {error}")),
+            )
+        ));
+    }
+
+    #[test]
+    fn wallet_note_ownership_marks_non_owner_note() {
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let wallet_bundle = build_wallet_scan_key_bundle(
+            ViewingPrivateKey::new([9_u8; 32]),
+            master_public_key("987654321"),
+        )
+        .unwrap_or_else(|error| panic!("scan bundle should build: {error}"));
+        let note = ReconstructedNote::new(
+            Note::new(
+                receiver,
+                None,
+                TokenHash::new([1_u8; 32]),
+                NoteRandom::new([2_u8; 16]),
+                NoteValue::new(3_u128),
+                None,
+                Vec::new(),
+                NotePublicKey::new(BigUint::from(4_u8))
+                    .unwrap_or_else(|error| panic!("note public key should validate: {error}")),
+                NoteCommitment::new(BigUint::from(5_u8))
+                    .unwrap_or_else(|error| panic!("commitment should validate: {error}")),
+            ),
+            NotePerspective::Received,
+            master_public_key("1"),
+        );
+
+        assert_eq!(
+            wallet_note_ownership(&wallet_bundle, &note),
+            WalletNoteOwnership::new(false, false)
+        );
+        assert!(!is_received_by_wallet(&wallet_bundle, &note));
+        assert!(!is_sent_by_wallet(&wallet_bundle, &note));
+    }
+
+    #[test]
+    fn wallet_note_ownership_marks_matching_sender_when_present() {
+        let wallet = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let wallet_bundle = build_wallet_scan_key_bundle(
+            ViewingPrivateKey::new([9_u8; 32]),
+            wallet.master_public_key().clone(),
+        )
+        .unwrap_or_else(|error| panic!("scan bundle should build: {error}"));
+        let note = ReconstructedNote::new(
+            Note::new(
+                receiver,
+                Some(wallet),
+                TokenHash::new([1_u8; 32]),
+                NoteRandom::new([2_u8; 16]),
+                NoteValue::new(3_u128),
+                Some(SenderRandom::null_sentinel()),
+                Vec::new(),
+                NotePublicKey::new(BigUint::from(4_u8))
+                    .unwrap_or_else(|error| panic!("note public key should validate: {error}")),
+                NoteCommitment::new(BigUint::from(5_u8))
+                    .unwrap_or_else(|error| panic!("commitment should validate: {error}")),
+            ),
+            NotePerspective::Sent,
+            master_public_key("2"),
+        );
+
+        assert_eq!(
+            wallet_note_ownership(&wallet_bundle, &note),
+            WalletNoteOwnership::new(false, true)
+        );
+        assert!(is_sent_by_wallet(&wallet_bundle, &note));
+    }
+
+    #[test]
+    fn wallet_note_ownership_requires_sender_metadata_for_sent_detection() {
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let wallet_bundle = build_wallet_scan_key_bundle(
+            ViewingPrivateKey::new([9_u8; 32]),
+            master_public_key("123456789"),
+        )
+        .unwrap_or_else(|error| panic!("scan bundle should build: {error}"));
+        let note = ReconstructedNote::new(
+            Note::new(
+                receiver,
+                None,
+                TokenHash::new([1_u8; 32]),
+                NoteRandom::new([2_u8; 16]),
+                NoteValue::new(3_u128),
+                Some(SenderRandom::new([7_u8; SenderRandom::LENGTH])),
+                Vec::new(),
+                NotePublicKey::new(BigUint::from(4_u8))
+                    .unwrap_or_else(|error| panic!("note public key should validate: {error}")),
+                NoteCommitment::new(BigUint::from(5_u8))
+                    .unwrap_or_else(|error| panic!("commitment should validate: {error}")),
+            ),
+            NotePerspective::Received,
+            master_public_key("3"),
+        );
+
+        assert_eq!(
+            wallet_note_ownership(&wallet_bundle, &note),
+            WalletNoteOwnership::new(false, false)
+        );
+        assert!(!is_sent_by_wallet(&wallet_bundle, &note));
     }
 
     #[test]

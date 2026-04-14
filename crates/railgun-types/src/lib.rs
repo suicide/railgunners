@@ -25,12 +25,12 @@ pub use field::{BN254_SCALAR_FIELD_MODULUS_BYTES, bn254_scalar_field_modulus};
 pub use keys::{
     BlindedViewingPublicKey, MasterPublicKey, NullifyingKey, PackedSpendingPublicKey,
     ShareableViewingKeyData, SharedSymmetricKey, SpendingKeyPair, SpendingPrivateKey,
-    SpendingPublicKey, ViewingKeyPair, ViewingPrivateKey, ViewingPublicKey,
+    SpendingPublicKey, ViewingKeyPair, ViewingPrivateKey, ViewingPublicKey, WalletScanKeyBundle,
 };
 pub use note::{
     LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment, NoteParty, NotePerspective,
     NotePublicKey, NoteRandom, NoteValue, Nullifier, ReconstructedNote, SenderRandom,
-    SenderRecovery, SenderVisibility, SharedRandom,
+    SenderRecovery, SenderVisibility, SharedRandom, WalletNoteOwnership,
 };
 pub use shield_ciphertext::{ShieldCiphertext, ShieldCiphertextBlock};
 pub use token::{Address, ChainId, TokenData, TokenHash, TokenSubId, TokenType, TxHash};

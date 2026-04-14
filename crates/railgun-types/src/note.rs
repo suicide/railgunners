@@ -97,6 +97,38 @@ impl SenderRecovery {
     }
 }
 
+/// Deterministic ownership result for a reconstructed note and one wallet bundle.
+///
+/// This stays as two explicit booleans rather than an enum because receiver and
+/// sender ownership are independent checks over the reconstructed note model.
+/// All four combinations are meaningful, including self-send cases where the
+/// same wallet can be both sender and receiver.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WalletNoteOwnership {
+    is_received_by_wallet: bool,
+    is_sent_by_wallet: bool,
+}
+
+impl WalletNoteOwnership {
+    /// Creates a note-ownership result.
+    #[must_use]
+    pub const fn new(is_received_by_wallet: bool, is_sent_by_wallet: bool) -> Self {
+        Self { is_received_by_wallet, is_sent_by_wallet }
+    }
+
+    /// Returns whether the note receiver matches the wallet bundle.
+    #[must_use]
+    pub const fn is_received_by_wallet(&self) -> bool {
+        self.is_received_by_wallet
+    }
+
+    /// Returns whether the note sender matches the wallet bundle.
+    #[must_use]
+    pub const fn is_sent_by_wallet(&self) -> bool {
+        self.is_sent_by_wallet
+    }
+}
+
 /// Minimal note party identity used during note construction.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NoteParty {
@@ -471,7 +503,7 @@ mod tests {
     use super::{
         LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment, NoteParty, NotePerspective,
         NotePublicKey, NoteRandom, NoteValue, Nullifier, ReconstructedNote, SenderRandom,
-        SenderRecovery, SenderVisibility, SharedRandom,
+        SenderRecovery, SenderVisibility, SharedRandom, WalletNoteOwnership,
     };
     use crate::{
         MasterPublicKey, ParseDomainError, TokenHash, ViewingPublicKey, bn254_scalar_field_modulus,
@@ -577,6 +609,14 @@ mod tests {
         assert!(!hidden.sender_visible());
         assert_eq!(hidden.visibility(), SenderVisibility::Hidden);
         assert_eq!(hidden.sender_master_public_key(), None);
+    }
+
+    #[test]
+    fn wallet_note_ownership_preserves_both_flags() {
+        let ownership = WalletNoteOwnership::new(true, false);
+
+        assert!(ownership.is_received_by_wallet());
+        assert!(!ownership.is_sent_by_wallet());
     }
 
     #[test]

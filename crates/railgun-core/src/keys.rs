@@ -10,7 +10,7 @@ use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
 use railgun_types::{
     MasterPublicKey, NullifyingKey, SpendingKeyPair, SpendingPrivateKey, SpendingPublicKey,
-    ViewingKeyPair, ViewingPrivateKey, ViewingPublicKey,
+    ViewingKeyPair, ViewingPrivateKey, ViewingPublicKey, WalletScanKeyBundle,
 };
 
 use crate::hd::{KeyDerivationError, WalletNode};
@@ -122,6 +122,30 @@ pub fn derive_viewing_key_pair(private_key: ViewingPrivateKey) -> ViewingKeyPair
     ViewingKeyPair::new(private_key, public_key)
 }
 
+/// Builds the canonical wallet scan-key bundle from the minimum required inputs.
+///
+/// The bundle keeps the caller-supplied master public key and derives the other
+/// scan-time fields from the viewing private key so later scan code can operate
+/// on one stable typed package.
+///
+/// # Errors
+///
+/// Returns an error if nullifying-key derivation fails unexpectedly.
+pub fn build_wallet_scan_key_bundle(
+    viewing_private_key: ViewingPrivateKey,
+    master_public_key: MasterPublicKey,
+) -> Result<WalletScanKeyBundle, KeyDerivationError> {
+    let viewing_public_key = derive_viewing_public_key(&viewing_private_key);
+    let nullifying_key = derive_nullifying_key(&viewing_private_key)?;
+
+    Ok(WalletScanKeyBundle::new(
+        viewing_private_key,
+        viewing_public_key,
+        nullifying_key,
+        master_public_key,
+    ))
+}
+
 /// Derives a nullifying key from a typed 32-byte viewing private key.
 ///
 /// The viewing private key bytes are interpreted as a big-endian integer before
@@ -187,15 +211,17 @@ pub fn derive_master_public_key(
 #[cfg(test)]
 mod tests {
     use super::{
-        derive_master_public_key, derive_nullifying_key, derive_nullifying_key_from_bytes,
-        derive_spending_key_pair, derive_spending_public_key,
+        build_wallet_scan_key_bundle, derive_master_public_key, derive_nullifying_key,
+        derive_nullifying_key_from_bytes, derive_spending_key_pair, derive_spending_public_key,
         derive_spending_public_key_from_bytes, derive_viewing_key_pair,
         derive_viewing_public_key_from_bytes, spending_private_key_from_node,
         viewing_private_key_from_node,
     };
     use crate::hd::{KeyDerivationError, derive_node_from_str};
     use num_bigint::BigUint;
-    use railgun_types::{NullifyingKey, SpendingPrivateKey, SpendingPublicKey, ViewingPrivateKey};
+    use railgun_types::{
+        MasterPublicKey, NullifyingKey, SpendingPrivateKey, SpendingPublicKey, ViewingPrivateKey,
+    };
 
     #[test]
     fn derives_spending_keypair_from_issue_vector_one() {
@@ -379,6 +405,32 @@ mod tests {
             master_public_key.value().to_string(),
             "15607618471549356314064749634364841401625982784343012680230632021308514635691"
         );
+    }
+
+    #[test]
+    fn builds_wallet_scan_key_bundle_from_viewing_private_key_and_master_public_key() {
+        let viewing_private_key = ViewingPrivateKey::new(hex_array::<32>(
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        ));
+        let master_public_key = MasterPublicKey::new(parse_decimal(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+        ))
+        .unwrap_or_else(|error| panic!("master public key should validate: {error}"));
+
+        let bundle = build_wallet_scan_key_bundle(viewing_private_key, master_public_key.clone())
+            .unwrap_or_else(|error| panic!("scan bundle should build: {error}"));
+
+        assert_eq!(bundle.viewing_private_key(), &viewing_private_key);
+        assert_eq!(
+            bundle.viewing_public_key(),
+            &derive_viewing_key_pair(viewing_private_key).public_key().to_owned()
+        );
+        assert_eq!(
+            bundle.nullifying_key(),
+            &derive_nullifying_key(&viewing_private_key)
+                .unwrap_or_else(|error| panic!("nullifying key should derive: {error}"))
+        );
+        assert_eq!(bundle.master_public_key(), &master_public_key);
     }
 
     #[test]
