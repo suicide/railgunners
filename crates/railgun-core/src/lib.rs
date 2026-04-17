@@ -10,6 +10,8 @@ pub mod hd;
 pub mod keys;
 pub mod network_id;
 pub mod note;
+/// Canonical UTXO and txid position helpers.
+pub mod position;
 pub mod shareable_viewing_key;
 pub mod shared_key;
 pub mod shield_ciphertext;
@@ -51,6 +53,12 @@ pub use note::{
     is_received_by_wallet, is_sent_by_wallet, matches_emitted_nullifier, reconstruct_v2_note,
     reconstruct_v3_note, recover_sender, sender_visibility, spent_state_for_tracked_note,
     validate_note_commitment, wallet_note_ownership,
+};
+pub use position::{
+    PositionError, commitment_leaf_position, global_tree_position,
+    global_tree_position_pre_transaction_poi_proof,
+    pre_transaction_poi_proof_hardcoded_leaf_position, pre_transaction_poi_proof_hardcoded_tree,
+    unshield_event_hardcoded_leaf_position, unshield_event_hardcoded_tree,
 };
 pub use shareable_viewing_key::{
     ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,

@@ -8,6 +8,7 @@ mod error;
 mod field;
 mod keys;
 mod note;
+mod position;
 mod shield_ciphertext;
 mod token;
 
@@ -32,6 +33,13 @@ pub use note::{
     NotePerspective, NotePublicKey, NoteRandom, NoteSpentState, NoteValue, Nullifier,
     ReconstructedNote, SenderRandom, SenderRecovery, SenderVisibility, SharedRandom,
     TrackedNoteNullifier, WalletNoteOwnership,
+};
+pub use position::{
+    CommitmentLeafPosition, GLOBAL_UTXO_POSITION_PRE_TRANSACTION_POI_PROOF_HARDCODED_VALUE,
+    GLOBAL_UTXO_POSITION_UNSHIELD_EVENT_HARDCODED_VALUE,
+    GLOBAL_UTXO_TREE_PRE_TRANSACTION_POI_PROOF_HARDCODED_VALUE,
+    GLOBAL_UTXO_TREE_UNSHIELD_EVENT_HARDCODED_VALUE, GlobalTreePosition, TREE_MAX_ITEMS,
+    UtxoLeafCoordinate, UtxoTreeCoordinate,
 };
 pub use shield_ciphertext::{ShieldCiphertext, ShieldCiphertextBlock};
 pub use token::{Address, ChainId, TokenData, TokenHash, TokenSubId, TokenType, TxHash};
