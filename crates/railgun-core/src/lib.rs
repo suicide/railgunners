@@ -3,6 +3,7 @@
 pub mod address;
 pub mod bip39;
 pub mod blinding;
+pub mod bound_params_v2;
 pub mod ciphertext_v2;
 pub mod ciphertext_v3;
 pub mod commitment_ciphertext;
@@ -25,6 +26,9 @@ pub use address::{
 };
 pub use bip39::{Bip39Error, Bip39Mnemonic, Bip39WordCount};
 pub use blinding::{BlindingError, derive_note_blinding_keys, unblind_note_key};
+pub use bound_params_v2::{
+    V2BoundParamsError, decode_v2_bound_params, derive_v2_bound_params_hash, encode_v2_bound_params,
+};
 pub use ciphertext_v2::{
     V2CiphertextError, decode_v2_plaintext, decrypt_v2_ciphertext, encode_v2_plaintext,
     encrypt_v2_ciphertext,

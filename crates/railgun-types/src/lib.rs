@@ -1,6 +1,7 @@
 //! Shared domain types for the RAILGUN workspace.
 
 mod address;
+mod bound_params_v2;
 mod ciphertext_v2;
 mod ciphertext_v3;
 mod commitment_ciphertext;
@@ -15,6 +16,9 @@ mod token;
 
 pub use address::{
     ChainScope, ChainType, NetworkId, RailgunAddress, RailgunAddressData, RailgunChain,
+};
+pub use bound_params_v2::{
+    AdaptParams, BoundParamsHash, MinGasPrice, V2BoundParams, V2UnshieldFlag,
 };
 pub use ciphertext_v2::{V2CiphertextBlock, V2CiphertextBundle, V2Plaintext};
 pub use ciphertext_v3::{V3CiphertextBundle, V3Plaintext, V3StoredNonce};
