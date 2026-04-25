@@ -8,6 +8,7 @@ pub mod ciphertext_v3;
 pub mod commitment_ciphertext;
 pub mod hd;
 pub mod keys;
+pub mod merkle;
 pub mod network_id;
 pub mod note;
 /// Canonical UTXO and txid position helpers.
@@ -46,6 +47,7 @@ pub use keys::{
     derive_viewing_public_key_from_bytes, spending_private_key_from_node,
     viewing_private_key_from_node,
 };
+pub use merkle::{MerkleProofError, create_dummy_merkle_proof, verify_merkle_proof};
 pub use network_id::{NetworkIdError, decode_network_id, encode_network_id};
 pub use note::{
     NoteReconstructionError, compute_tracked_note_nullifier, decode_master_public_key,

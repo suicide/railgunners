@@ -7,6 +7,7 @@ mod commitment_ciphertext;
 mod error;
 mod field;
 mod keys;
+mod merkle;
 mod note;
 mod position;
 mod shield_ciphertext;
@@ -27,6 +28,9 @@ pub use keys::{
     BlindedViewingPublicKey, MasterPublicKey, NullifyingKey, PackedSpendingPublicKey,
     ShareableViewingKeyData, SharedSymmetricKey, SpendingKeyPair, SpendingPrivateKey,
     SpendingPublicKey, ViewingKeyPair, ViewingPrivateKey, ViewingPublicKey, WalletScanKeyBundle,
+};
+pub use merkle::{
+    MerkleNodeHash, MerkleProof, MerkleProofElement, MerkleProofIndices, MerkleRoot, TREE_DEPTH,
 };
 pub use note::{
     EmittedNullifier, LeafIndex, MEMO_SENDER_RANDOM_NULL_BYTES, Note, NoteCommitment, NoteParty,
