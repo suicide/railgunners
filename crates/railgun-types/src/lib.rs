@@ -2,6 +2,7 @@
 
 mod address;
 mod bound_params_v2;
+mod bound_params_v3;
 mod ciphertext_v2;
 mod ciphertext_v3;
 mod commitment_ciphertext;
@@ -19,6 +20,9 @@ pub use address::{
 };
 pub use bound_params_v2::{
     AdaptParams, BoundParamsHash, MinGasPrice, V2BoundParams, V2UnshieldFlag,
+};
+pub use bound_params_v3::{
+    V3BoundParams, V3BoundParamsGlobal, V3BoundParamsLocal, V3ChainId, V3MinGasPrice,
 };
 pub use ciphertext_v2::{V2CiphertextBlock, V2CiphertextBundle, V2Plaintext};
 pub use ciphertext_v3::{V3CiphertextBundle, V3Plaintext, V3StoredNonce};
