@@ -16,13 +16,12 @@ alloy-primitives = "0.8.26"
 alloy-sol-types = "0.8.26"
 ark-bn254 = "0.5.0"
 ark-ff = "0.5.0"
-babyjubjub-rs.workspace = true
 bech32.workspace = true
+blake-hash = "0.4.1"
 bip39 = { version = "2.2.2", features = ["rand"] }
 chacha20poly1305 = "0.10.1"
 curve25519-dalek = "5.0.0-pre.6"
 ed25519-dalek = "3.0.0-pre.6"
-ff.workspace = true
 hmac = "0.12.1"
 light-poseidon = "0.4.0"
 num-bigint.workspace = true

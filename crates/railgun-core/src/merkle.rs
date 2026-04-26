@@ -1,9 +1,9 @@
 //! Canonical Merkle proof creation and local verification.
 
+use num_bigint::BigUint;
 use railgun_types::{
     MerkleNodeHash, MerkleProof, MerkleProofElement, MerkleProofIndices, MerkleRoot, TREE_DEPTH,
 };
-use num_bigint::BigUint;
 
 use crate::crypto::poseidon;
 

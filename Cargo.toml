@@ -18,9 +18,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 railgun-types = { path = "crates/railgun-types" }
 railgun-core = { path = "crates/railgun-core" }
-babyjubjub-rs = "0.0.11"
 bech32 = "0.11.1"
-ff = { package = "ff_ce", version = "0.11" }
 num-bigint = "0.4.6"
 serde = { version = "1.0.228", features = ["derive"] }
 
