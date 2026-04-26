@@ -1,8 +1,5 @@
 //! Canonical note public key, commitment, and nullifier derivation.
 
-use ark_bn254::Fr;
-use ark_ff::{BigInteger, PrimeField};
-use light_poseidon::{Poseidon, PoseidonHasher};
 use num_bigint::BigUint;
 use railgun_types::{
     BlindedViewingPublicKey, EmittedNullifier, LeafIndex, MasterPublicKey, Note, NoteCommitment,
@@ -12,7 +9,7 @@ use railgun_types::{
     WalletScanKeyBundle,
 };
 
-use crate::{blinding::BlindingError, hd::KeyDerivationError, unblind_note_key};
+use crate::{blinding::BlindingError, crypto::poseidon, hd::KeyDerivationError, unblind_note_key};
 
 /// Error returned when note reconstruction or validation fails.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -60,14 +57,6 @@ impl From<BlindingError> for NoteReconstructionError {
             | BlindingError::InvalidBlindedViewingPublicKey => Self::InvalidBlindedViewingKey,
         }
     }
-}
-
-fn biguint_to_bn254_field(value: &BigUint) -> Result<Fr, KeyDerivationError> {
-    let bytes = value.to_bytes_be();
-    let field = Fr::from_be_bytes_mod_order(&bytes);
-    let roundtrip = BigUint::from_bytes_be(&field.into_bigint().to_bytes_be());
-
-    if roundtrip == *value { Ok(field) } else { Err(KeyDerivationError::DerivationFailure) }
 }
 
 /// Resolves sender visibility from the optional sender-random field.
@@ -182,14 +171,13 @@ pub fn derive_note_public_key(
     random: &NoteRandom,
 ) -> Result<NotePublicKey, KeyDerivationError> {
     let inputs = [
-        biguint_to_bn254_field(receiver_master_public_key.value())?,
-        Fr::from_be_bytes_mod_order(random.as_bytes()),
+        poseidon::field_from_biguint(receiver_master_public_key.value())
+            .map_err(|_| KeyDerivationError::DerivationFailure)?,
+        poseidon::field_from_bytes_mod_order(random.as_bytes()),
     ];
-    let mut poseidon =
-        Poseidon::<Fr>::new_circom(2).map_err(|_| KeyDerivationError::DerivationFailure)?;
-    let hash = poseidon.hash(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    let hash = poseidon::hash_fields(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
 
-    NotePublicKey::new(BigUint::from_bytes_be(&hash.into_bigint().to_bytes_be()))
+    NotePublicKey::new(poseidon::field_to_biguint(hash))
         .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
@@ -208,15 +196,14 @@ pub fn derive_note_commitment(
     value: NoteValue,
 ) -> Result<NoteCommitment, KeyDerivationError> {
     let inputs = [
-        biguint_to_bn254_field(note_public_key.value())?,
-        Fr::from_be_bytes_mod_order(token_hash.as_bytes()),
-        Fr::from(value.get()),
+        poseidon::field_from_biguint(note_public_key.value())
+            .map_err(|_| KeyDerivationError::DerivationFailure)?,
+        poseidon::field_from_bytes_mod_order(token_hash.as_bytes()),
+        value.get().into(),
     ];
-    let mut poseidon =
-        Poseidon::<Fr>::new_circom(3).map_err(|_| KeyDerivationError::DerivationFailure)?;
-    let hash = poseidon.hash(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    let hash = poseidon::hash_fields(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
 
-    NoteCommitment::new(BigUint::from_bytes_be(&hash.into_bigint().to_bytes_be()))
+    NoteCommitment::new(poseidon::field_to_biguint(hash))
         .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
@@ -500,12 +487,14 @@ pub fn derive_nullifier(
     nullifying_key: &NullifyingKey,
     leaf_index: LeafIndex,
 ) -> Result<Nullifier, KeyDerivationError> {
-    let inputs = [biguint_to_bn254_field(nullifying_key.value())?, Fr::from(leaf_index.get())];
-    let mut poseidon =
-        Poseidon::<Fr>::new_circom(2).map_err(|_| KeyDerivationError::DerivationFailure)?;
-    let hash = poseidon.hash(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    let inputs = [
+        poseidon::field_from_biguint(nullifying_key.value())
+            .map_err(|_| KeyDerivationError::DerivationFailure)?,
+        leaf_index.get().into(),
+    ];
+    let hash = poseidon::hash_fields(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
 
-    Nullifier::new(BigUint::from_bytes_be(&hash.into_bigint().to_bytes_be()))
+    Nullifier::new(poseidon::field_to_biguint(hash))
         .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 

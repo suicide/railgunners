@@ -11,7 +11,5 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-babyjubjub-rs.workspace = true
 bech32.workspace = true
-ff.workspace = true
 num-bigint.workspace = true

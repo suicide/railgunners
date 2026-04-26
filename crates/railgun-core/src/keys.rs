@@ -1,41 +1,18 @@
 //! Railgun spending and viewing keypair derivation.
 
-use ark_bn254::Fr;
-use ark_ff::{BigInteger, PrimeField};
-use babyjubjub_rs::Fr as BabyJubJubField;
-use babyjubjub_rs::PrivateKey as BabyJubJubPrivateKey;
 use ed25519_dalek::SigningKey;
-use ff::{PrimeField as _, PrimeFieldRepr as _};
-use light_poseidon::{Poseidon, PoseidonHasher};
-use num_bigint::BigUint;
 use railgun_types::{
     MasterPublicKey, NullifyingKey, SpendingKeyPair, SpendingPrivateKey, SpendingPublicKey,
     ViewingKeyPair, ViewingPrivateKey, ViewingPublicKey, WalletScanKeyBundle,
 };
 
+use crate::crypto::{CryptoError, babyjubjub, poseidon};
 use crate::hd::{KeyDerivationError, WalletNode};
 
-// This module currently touches two different field-element types that both use
-// the conventional `Fr` name:
-// - `ark_bn254::Fr` is the BN254 scalar field used by `light-poseidon`.
-// - `babyjubjub_rs::Fr` is the BabyJubJub field type used for public-key
-//   coordinates returned by `babyjubjub-rs`.
-//
-// They come from different libraries and trait ecosystems, so we alias the
-// BabyJubJub one and import both trait sets explicitly.
-fn parse_coordinate(value: &BabyJubJubField) -> Result<BigUint, KeyDerivationError> {
-    let repr = value.into_repr();
-    let mut bytes = Vec::with_capacity(core::mem::size_of_val(repr.as_ref()));
-    repr.write_be(&mut bytes).map_err(|_| KeyDerivationError::DerivationFailure)?;
-    Ok(BigUint::from_bytes_be(&bytes))
-}
-
-fn biguint_to_bn254_field(value: &BigUint) -> Result<Fr, KeyDerivationError> {
-    let bytes = value.to_bytes_be();
-    let field = Fr::from_be_bytes_mod_order(&bytes);
-    let roundtrip = BigUint::from_bytes_be(&field.into_bigint().to_bytes_be());
-
-    if roundtrip == *value { Ok(field) } else { Err(KeyDerivationError::DerivationFailure) }
+impl From<CryptoError> for KeyDerivationError {
+    fn from(_: CryptoError) -> Self {
+        Self::DerivationFailure
+    }
 }
 
 /// Converts a wallet node into a typed spending private key.
@@ -59,12 +36,7 @@ pub fn viewing_private_key_from_node(node: &WalletNode) -> ViewingPrivateKey {
 pub fn derive_spending_public_key(
     private_key: &SpendingPrivateKey,
 ) -> Result<SpendingPublicKey, KeyDerivationError> {
-    let private_key = BabyJubJubPrivateKey::import(private_key.as_bytes().to_vec())
-        .map_err(|_| KeyDerivationError::DerivationFailure)?;
-    let public_key = private_key.public();
-    let x = parse_coordinate(&public_key.x)?;
-    let y = parse_coordinate(&public_key.y)?;
-    SpendingPublicKey::new(x, y).map_err(|_| KeyDerivationError::DerivationFailure)
+    babyjubjub::derive_spending_public_key(private_key).map_err(Into::into)
 }
 
 /// Derives a spending public key from raw private-key bytes.
@@ -157,13 +129,10 @@ pub fn build_wallet_scan_key_bundle(
 pub fn derive_nullifying_key(
     private_key: &ViewingPrivateKey,
 ) -> Result<NullifyingKey, KeyDerivationError> {
-    let input = Fr::from_be_bytes_mod_order(private_key.as_bytes());
-    let mut poseidon =
-        Poseidon::<Fr>::new_circom(1).map_err(|_| KeyDerivationError::DerivationFailure)?;
-    let hash = poseidon.hash(&[input]).map_err(|_| KeyDerivationError::DerivationFailure)?;
-    let bytes = hash.into_bigint().to_bytes_be();
+    let input = poseidon::field_from_bytes_mod_order(private_key.as_bytes());
+    let hash = poseidon::hash_fields(&[input])?;
 
-    NullifyingKey::new(BigUint::from_bytes_be(&bytes))
+    NullifyingKey::new(poseidon::field_to_biguint(hash))
         .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 
@@ -195,16 +164,15 @@ pub fn derive_master_public_key(
     spending_public_key: &SpendingPublicKey,
     nullifying_key: &NullifyingKey,
 ) -> Result<MasterPublicKey, KeyDerivationError> {
+    babyjubjub::validate_spending_public_key(spending_public_key)?;
     let inputs = [
-        biguint_to_bn254_field(spending_public_key.x())?,
-        biguint_to_bn254_field(spending_public_key.y())?,
-        biguint_to_bn254_field(nullifying_key.value())?,
+        poseidon::field_from_biguint(spending_public_key.x())?,
+        poseidon::field_from_biguint(spending_public_key.y())?,
+        poseidon::field_from_biguint(nullifying_key.value())?,
     ];
-    let mut poseidon =
-        Poseidon::<Fr>::new_circom(3).map_err(|_| KeyDerivationError::DerivationFailure)?;
-    let hash = poseidon.hash(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
+    let hash = poseidon::hash_fields(&inputs)?;
 
-    MasterPublicKey::new(BigUint::from_bytes_be(&hash.into_bigint().to_bytes_be()))
+    MasterPublicKey::new(poseidon::field_to_biguint(hash))
         .map_err(|_| KeyDerivationError::DerivationFailure)
 }
 

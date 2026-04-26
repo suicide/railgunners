@@ -1,28 +1,6 @@
-use babyjubjub_rs::{Fr as BabyJubJubField, Point, decompress_point};
-use ff::{PrimeField as _, PrimeFieldRepr as _};
 use num_bigint::BigUint;
 
 use crate::{ParseDomainError, validate_bn254_scalar};
-
-fn biguint_to_babyjubjub_field(value: &BigUint) -> Result<BabyJubJubField, ParseDomainError> {
-    let field = BabyJubJubField::from_str(&value.to_string()).ok_or(ParseDomainError::new(
-        "spending public key coordinates must fit within the BabyJubJub field",
-    ))?;
-    let repr = field.into_repr();
-    let mut bytes = Vec::with_capacity(core::mem::size_of_val(repr.as_ref()));
-    repr.write_be(&mut bytes).map_err(|_| {
-        ParseDomainError::new(
-            "spending public key coordinates must fit within the BabyJubJub field",
-        )
-    })?;
-    if BigUint::from_bytes_be(&bytes) == *value {
-        Ok(field)
-    } else {
-        Err(ParseDomainError::new(
-            "spending public key coordinates must fit within the BabyJubJub field",
-        ))
-    }
-}
 
 /// Typed 32-byte Railgun spending private key.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -65,28 +43,23 @@ pub struct SpendingPublicKey {
 }
 
 impl SpendingPublicKey {
-    /// Creates a spending public key from `BabyJubJub` coordinates.
+    /// Creates a spending public key from canonical coordinate integers.
     ///
     /// # Errors
     ///
-    /// Returns an error if either coordinate is outside the `BabyJubJub` field or
-    /// if the coordinates do not represent a valid compressible `BabyJubJub` point.
+    /// Returns an error if either coordinate is not a valid BN254 scalar-field
+    /// element. Curve-point validation belongs in `railgun-core`, where the crypto
+    /// backend is selected.
     pub fn new(x: BigUint, y: BigUint) -> Result<Self, ParseDomainError> {
-        let point =
-            Point { x: biguint_to_babyjubjub_field(&x)?, y: biguint_to_babyjubjub_field(&y)? };
-        let compressed = point.compress();
-        let decompressed = decompress_point(compressed).map_err(|_| {
-            ParseDomainError::new(
-                "spending public key coordinates must form a valid BabyJubJub point",
-            )
-        })?;
-        if decompressed.x == point.x && decompressed.y == point.y {
-            Ok(Self { x, y })
-        } else {
-            Err(ParseDomainError::new(
-                "spending public key coordinates must form a valid BabyJubJub point",
-            ))
-        }
+        validate_bn254_scalar(
+            &x,
+            "spending public key x coordinate must fit within the BN254 scalar field",
+        )?;
+        validate_bn254_scalar(
+            &y,
+            "spending public key y coordinate must fit within the BN254 scalar field",
+        )?;
+        Ok(Self { x, y })
     }
 
     /// Returns the x coordinate.
@@ -556,14 +529,29 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_spending_public_key_point() {
-        let Err(error) = SpendingPublicKey::new(BigUint::from(1_u8), BigUint::from(1_u8)) else {
+    fn rejects_invalid_spending_public_key_x_coordinate() {
+        let Err(error) = SpendingPublicKey::new(bn254_scalar_field_modulus(), BigUint::from(1_u8))
+        else {
             panic!("invalid spending public key should fail");
         };
         assert_eq!(
             error,
             ParseDomainError::new(
-                "spending public key coordinates must form a valid BabyJubJub point"
+                "spending public key x coordinate must fit within the BN254 scalar field"
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_spending_public_key_y_coordinate() {
+        let Err(error) = SpendingPublicKey::new(BigUint::from(1_u8), bn254_scalar_field_modulus())
+        else {
+            panic!("invalid spending public key should fail");
+        };
+        assert_eq!(
+            error,
+            ParseDomainError::new(
+                "spending public key y coordinate must fit within the BN254 scalar field"
             )
         );
     }

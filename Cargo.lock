@@ -1868,9 +1868,7 @@ dependencies = [
 name = "railgun-types"
 version = "0.1.0"
 dependencies = [
- "babyjubjub-rs",
  "bech32",
- "ff_ce",
  "num-bigint 0.4.6",
 ]
 

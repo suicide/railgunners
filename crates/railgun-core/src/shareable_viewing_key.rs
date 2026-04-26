@@ -2,12 +2,11 @@
 
 use core::fmt;
 
-use babyjubjub_rs::{Fr as BabyJubJubField, Point, decompress_point};
-use ff::{PrimeField as _, PrimeFieldRepr as _};
-use num_bigint::BigUint;
 use railgun_types::{PackedSpendingPublicKey, ShareableViewingKeyData, SpendingPublicKey};
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
+
+use crate::crypto::{CryptoError, babyjubjub};
 
 /// Error returned when a shareable viewing key payload is malformed.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,25 +61,15 @@ struct ShareableViewingKeyPayload {
     packed_spending_public_key: ByteBuf,
 }
 
-fn parse_coordinate(value: &BabyJubJubField) -> Result<BigUint, ShareableViewingKeyError> {
-    let repr = value.into_repr();
-    let mut bytes = Vec::with_capacity(core::mem::size_of_val(repr.as_ref()));
-    repr.write_be(&mut bytes)
-        .map_err(|_| ShareableViewingKeyError::InvalidPackedSpendingPublicKey)?;
-    Ok(BigUint::from_bytes_be(&bytes))
-}
-
-fn biguint_to_babyjubjub_field(
-    value: &BigUint,
-) -> Result<BabyJubJubField, ShareableViewingKeyError> {
-    let field = BabyJubJubField::from_str(&value.to_string())
-        .ok_or(ShareableViewingKeyError::InvalidSpendingPublicKey)?;
-    let roundtrip = parse_coordinate(&field)?;
-
-    if roundtrip == *value {
-        Ok(field)
-    } else {
-        Err(ShareableViewingKeyError::InvalidSpendingPublicKey)
+impl From<CryptoError> for ShareableViewingKeyError {
+    fn from(value: CryptoError) -> Self {
+        match value {
+            CryptoError::InvalidPackedSpendingPublicKey => Self::InvalidPackedSpendingPublicKey,
+            CryptoError::InvalidSpendingPublicKey => Self::InvalidSpendingPublicKey,
+            CryptoError::InvalidFieldElement | CryptoError::DerivationFailure => {
+                Self::InvalidPackedSpendingPublicKey
+            }
+        }
     }
 }
 
@@ -122,12 +111,7 @@ fn decode_hex(value: &str) -> Result<Vec<u8>, ShareableViewingKeyError> {
 pub fn pack_spending_public_key(
     spending_public_key: &SpendingPublicKey,
 ) -> Result<PackedSpendingPublicKey, ShareableViewingKeyError> {
-    let point = Point {
-        x: biguint_to_babyjubjub_field(spending_public_key.x())?,
-        y: biguint_to_babyjubjub_field(spending_public_key.y())?,
-    };
-
-    Ok(PackedSpendingPublicKey::new(point.compress()))
+    babyjubjub::pack_spending_public_key(spending_public_key).map_err(Into::into)
 }
 
 /// Unpacks a canonical 32-byte `BabyJubJub` spending public key.
@@ -138,11 +122,7 @@ pub fn pack_spending_public_key(
 pub fn unpack_spending_public_key(
     packed_spending_public_key: &PackedSpendingPublicKey,
 ) -> Result<SpendingPublicKey, ShareableViewingKeyError> {
-    let point = decompress_point(*packed_spending_public_key.as_bytes())
-        .map_err(|_| ShareableViewingKeyError::InvalidPackedSpendingPublicKey)?;
-
-    SpendingPublicKey::new(parse_coordinate(&point.x)?, parse_coordinate(&point.y)?)
-        .map_err(|_| ShareableViewingKeyError::InvalidPackedSpendingPublicKey)
+    babyjubjub::unpack_spending_public_key(packed_spending_public_key).map_err(Into::into)
 }
 
 /// Encodes a shareable viewing key payload as lowercase hexadecimal `MessagePack`.

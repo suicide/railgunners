@@ -1,12 +1,11 @@
 //! Canonical Merkle proof creation and local verification.
 
-use ark_bn254::Fr;
-use ark_ff::{BigInteger, PrimeField};
-use light_poseidon::{Poseidon, PoseidonHasher};
-use num_bigint::BigUint;
 use railgun_types::{
     MerkleNodeHash, MerkleProof, MerkleProofElement, MerkleProofIndices, MerkleRoot, TREE_DEPTH,
 };
+use num_bigint::BigUint;
+
+use crate::crypto::poseidon;
 
 /// Error returned when local Merkle proof verification inputs are malformed.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,20 +32,12 @@ impl core::fmt::Display for MerkleProofError {
 
 impl std::error::Error for MerkleProofError {}
 
-fn field_from_hash_bytes(bytes: &[u8; 32]) -> Result<Fr, MerkleProofError> {
-    let value = BigUint::from_bytes_be(bytes);
-    let field = Fr::from_be_bytes_mod_order(bytes);
-    let roundtrip = BigUint::from_bytes_be(&field.into_bigint().to_bytes_be());
-
-    if roundtrip == value { Ok(field) } else { Err(MerkleProofError::HashingFailure) }
+fn field_from_hash_bytes(bytes: &[u8; 32]) -> Result<ark_bn254::Fr, MerkleProofError> {
+    poseidon::field_from_canonical_bytes(bytes).map_err(|_| MerkleProofError::HashingFailure)
 }
 
-fn merkle_node_hash_from_field(field: Fr) -> MerkleNodeHash {
-    let bytes = field.into_bigint().to_bytes_be();
-    let mut padded = [0_u8; MerkleNodeHash::LENGTH];
-    let start = MerkleNodeHash::LENGTH - bytes.len();
-    padded[start..].copy_from_slice(&bytes);
-    MerkleNodeHash::new(padded)
+fn merkle_node_hash_from_field(field: ark_bn254::Fr) -> MerkleNodeHash {
+    MerkleNodeHash::new(poseidon::field_to_canonical_bytes(field))
 }
 
 fn hash_left_right(
@@ -57,9 +48,8 @@ fn hash_left_right(
         field_from_hash_bytes(left.as_bytes()).map_err(|_| MerkleProofError::InvalidLeafHash)?;
     let right =
         field_from_hash_bytes(right.as_bytes()).map_err(|_| MerkleProofError::HashingFailure)?;
-    let mut poseidon =
-        Poseidon::<Fr>::new_circom(2).map_err(|_| MerkleProofError::HashingFailure)?;
-    let hash = poseidon.hash(&[left, right]).map_err(|_| MerkleProofError::HashingFailure)?;
+    let hash =
+        poseidon::hash_fields(&[left, right]).map_err(|_| MerkleProofError::HashingFailure)?;
 
     Ok(merkle_node_hash_from_field(hash))
 }
@@ -72,9 +62,8 @@ fn hash_pair(
         field_from_hash_bytes(left.as_bytes()).map_err(|_| MerkleProofError::InvalidLeafHash)?;
     let right =
         field_from_hash_bytes(right.as_bytes()).map_err(|_| MerkleProofError::HashingFailure)?;
-    let mut poseidon =
-        Poseidon::<Fr>::new_circom(2).map_err(|_| MerkleProofError::HashingFailure)?;
-    let hash = poseidon.hash(&[left, right]).map_err(|_| MerkleProofError::HashingFailure)?;
+    let hash =
+        poseidon::hash_fields(&[left, right]).map_err(|_| MerkleProofError::HashingFailure)?;
 
     Ok(merkle_node_hash_from_field(hash))
 }

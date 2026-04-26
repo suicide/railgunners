@@ -8,6 +8,7 @@ pub mod bound_params_v3;
 pub mod ciphertext_v2;
 pub mod ciphertext_v3;
 pub mod commitment_ciphertext;
+mod crypto;
 pub mod hd;
 pub mod keys;
 pub mod merkle;
