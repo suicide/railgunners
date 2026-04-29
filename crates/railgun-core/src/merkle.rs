@@ -135,10 +135,11 @@ pub fn verify_merkle_proof(
 
 #[cfg(test)]
 mod tests {
-    use ark_bn254::Fr;
-    use ark_ff::{BigInteger, PrimeField};
-    use light_poseidon::{Poseidon, PoseidonHasher};
+    use num_bigint::BigUint;
+    use num_traits::Num;
     use railgun_types::{MerkleProofElement, MerkleProofIndices, MerkleRoot};
+
+    use crate::crypto::poseidon;
 
     use super::{
         MerkleNodeHash, MerkleProof, MerkleProofError, create_dummy_merkle_proof,
@@ -173,21 +174,14 @@ mod tests {
         utxo_tree_in: u64,
         global_tree_position: u64,
     ) -> MerkleNodeHash {
-        let mut poseidon = Poseidon::<Fr>::new_circom(3)
-            .unwrap_or_else(|_| panic!("three-input poseidon should initialize"));
-        let hash = poseidon
-            .hash(&[
-                Fr::from_be_bytes_mod_order(&decode_hex::<32>(railgun_txid)),
-                Fr::from(utxo_tree_in),
-                Fr::from(global_tree_position),
-            ])
+        let txid = BigUint::from_str_radix(railgun_txid, 16)
+            .unwrap_or_else(|error| panic!("txid hex should parse: {error}"));
+        let hash = poseidon::hash_railgun_txid_leaf(&txid, utxo_tree_in, global_tree_position)
             .unwrap_or_else(|_| panic!("txid leaf hash should derive"));
-
-        let bytes = hash.into_bigint().to_bytes_be();
-        let mut padded = [0_u8; 32];
-        let start = 32 - bytes.len();
-        padded[start..].copy_from_slice(&bytes);
-        MerkleNodeHash::new(padded)
+        MerkleNodeHash::new(poseidon::field_to_canonical_bytes(
+            poseidon::field_from_biguint(&hash)
+                .unwrap_or_else(|_| panic!("txid leaf hash should be canonical field element")),
+        ))
     }
 
     #[test]

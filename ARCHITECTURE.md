@@ -73,6 +73,19 @@ Examples include:
 
 `railgun-core` should not become a grab bag. If a subsystem develops meaningful complexity, it should graduate into its own crate.
 
+#### Crypto Backend Placement
+
+Protocol-critical cryptographic backends that are required for shared core behavior may live inside `railgun-core` when they are implementation details of the core protocol surface rather than reusable products of their own.
+
+This repository currently keeps the Circom-compatible Poseidon backend in `railgun-core::crypto` rather than splitting it into a separate crate because:
+
+- exact arity and conversion behavior is part of the shared protocol surface
+- the current need is internal core functionality, not a reusable standalone package
+- no other workspace crate needs to depend on the backend directly today
+- adding a new crate would introduce a boundary without clear ownership or reuse pressure yet
+
+If future work creates genuine reuse pressure across independent consumers, the backend can be extracted later behind the existing core facade.
+
 ### Domain-Specific Crates
 
 Additional domain-specific crates should be introduced only when real feature work justifies the boundary.

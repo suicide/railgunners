@@ -95,6 +95,8 @@ When adding a crate or major module:
 - avoid overlapping ownership with existing crates
 - prefer moving reusable concepts into shared domain crates only when there is real reuse
 
+The current Poseidon backend is intentionally kept inside `railgun-core::crypto` for this reason. It serves shared protocol behavior, must preserve exact Circom-compatible semantics, and does not yet justify a separate crate boundary.
+
 Do not create a new crate just because a file feels large. Create one when it clarifies boundaries.
 
 ## Public API Expectations
