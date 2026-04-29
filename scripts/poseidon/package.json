@@ -1,0 +1,13 @@
+{
+  "name": "railgun-rs-poseidon-vectors",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate-vectors.mjs",
+    "check": "node generate-vectors.mjs --check"
+  },
+  "dependencies": {
+    "@railgun-community/circomlibjs": "0.0.8",
+    "@railgun-community/engine": "9.5.4"
+  }
+}

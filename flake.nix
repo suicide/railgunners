@@ -98,6 +98,8 @@
             cargo-watch
             rust-analyzer
             nixfmt
+
+            nodejs
           ];
 
           env = {

@@ -137,11 +137,34 @@ This split keeps the general crypto surface strict while preserving exact txid i
 
 ## More Test Vectors
 
-Additional vector-generation scripts should be added under `scripts/poseidon/` so future parity cases can be generated from public reference implementations rather than copied manually.
+Vector-generation scripts now live under `scripts/poseidon/` so future parity cases can be generated from public reference implementations rather than copied manually.
 
-Recommended future generators:
+Install the script dependencies with:
 
-- a `circomlibjs`-based script for generic Poseidon vectors
-- a txid-specific script that mirrors the public engine txid path
+```sh
+npm install --prefix scripts/poseidon
+```
 
-Until those scripts are added, any new vectors committed here should cite the exact public source file they were taken from.
+Generate the committed fixtures with:
+
+```sh
+node scripts/poseidon/generate-vectors.mjs
+```
+
+Check that committed fixtures still match the public oracles without rewriting them:
+
+```sh
+node scripts/poseidon/generate-vectors.mjs --check
+```
+
+Current generated fixture files:
+
+- `crates/railgun-core/testdata/poseidon/circomlibjs.json`
+- `crates/railgun-core/testdata/poseidon/engine-txid.json`
+
+Current generators cover:
+
+- generic `circomlibjs` Poseidon vectors for curated arities and fixed input families
+- txid-specific vectors that mirror the public engine txid path, including the canonical Merkle zero, padded intermediate hashes, final txid, and txid-leaf hash
+
+Any new vectors committed here should still cite the exact public source file they were taken from or the exact script/oracle combination that generated them.
