@@ -40,7 +40,13 @@ const ENGINE_SOURCE = {
   repo: 'https://github.com/Railgun-Community/engine',
   txidPath: 'src/transaction/railgun-txid.ts',
   merkleZeroPath: 'src/models/merkletree-types.ts',
+  proofVectorPath: 'src/test/test-vector-poi.json',
 };
+
+const ENGINE_PROOF_VECTOR_URL =
+  'https://raw.githubusercontent.com/Railgun-Community/engine/main/src/test/test-vector-poi.json';
+const BN254_SCALAR_FIELD_MODULUS =
+  21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 const GLOBAL_TREE_POSITION_TREE = 99_999;
 const GLOBAL_TREE_POSITION_INDEX = 99_999;
@@ -65,6 +71,26 @@ const CIRCOMLIBJS_CASES = [
   {
     name: 'thirteen_one_through_thirteen',
     inputs: Array.from({ length: 13 }, (_, index) => BigInt(index + 1)),
+  },
+  {
+    name: 'pair_zero_modulus_minus_one',
+    inputs: [0n, BN254_SCALAR_FIELD_MODULUS - 1n],
+  },
+  {
+    name: 'triple_one_modulus_minus_one_two',
+    inputs: [1n, BN254_SCALAR_FIELD_MODULUS - 1n, 2n],
+  },
+  {
+    name: 'alternating_zero_one_arity_8',
+    inputs: Array.from({ length: 8 }, (_, index) => BigInt(index % 2)),
+  },
+  {
+    name: 'powers_of_two_arity_4',
+    inputs: [1n, 2n, 4n, 8n],
+  },
+  {
+    name: 'near_modulus_descending_arity_13',
+    inputs: Array.from({ length: 13 }, (_, index) => BN254_SCALAR_FIELD_MODULUS - BigInt(index + 1)),
   },
 ];
 
@@ -97,6 +123,45 @@ const ENGINE_TXID_CASES = [
     utxoTreeIn: 7,
     globalTreePosition: getGlobalTreePosition(2, 9),
   },
+  {
+    name: 'empty_inputs',
+    nullifiers: [],
+    commitments: [],
+    boundParamsHash: ByteUtils.nToHex(42n, ByteLength.UINT_256),
+    utxoTreeIn: 3,
+    globalTreePosition: getGlobalTreePosition(4, 5),
+  },
+  {
+    name: 'twelve_nullifiers_empty_commitments',
+    nullifiers: Array.from({ length: 12 }, (_, index) => ByteUtils.nToHex(BigInt(index + 101), ByteLength.UINT_256)),
+    commitments: [],
+    boundParamsHash: ByteUtils.nToHex(123456789n, ByteLength.UINT_256),
+    utxoTreeIn: 11,
+    globalTreePosition: getGlobalTreePosition(6, 12),
+  },
+  {
+    name: 'empty_nullifiers_twelve_commitments',
+    nullifiers: [],
+    commitments: Array.from({ length: 12 }, (_, index) => ByteUtils.nToHex(BigInt(index + 201), ByteLength.UINT_256)),
+    boundParamsHash: ByteUtils.nToHex(987654321n, ByteLength.UINT_256),
+    utxoTreeIn: 12,
+    globalTreePosition: getGlobalTreePosition(8, 1),
+  },
+  {
+    name: 'near_modulus_values',
+    nullifiers: [
+      ByteUtils.nToHex(BN254_SCALAR_FIELD_MODULUS - 1n, ByteLength.UINT_256),
+      ByteUtils.nToHex(BN254_SCALAR_FIELD_MODULUS + 5n, ByteLength.UINT_256),
+    ],
+    commitments: [
+      ByteUtils.nToHex(BN254_SCALAR_FIELD_MODULUS - 2n, ByteLength.UINT_256),
+      ByteUtils.nToHex(BN254_SCALAR_FIELD_MODULUS + 7n, ByteLength.UINT_256),
+      ByteUtils.nToHex((BN254_SCALAR_FIELD_MODULUS * 2n) + 9n, ByteLength.UINT_256),
+    ],
+    boundParamsHash: ByteUtils.nToHex(BN254_SCALAR_FIELD_MODULUS + 11n, ByteLength.UINT_256),
+    utxoTreeIn: 255,
+    globalTreePosition: getGlobalTreePosition(1234, 5678),
+  },
 ];
 
 await initPoseidonPromise;
@@ -106,6 +171,9 @@ const outDir = path.resolve(REPO_ROOT, args.outDir ?? DEFAULT_OUT_DIR);
 const only = args.only ?? 'all';
 
 await mkdir(outDir, { recursive: true });
+
+const engineMerkleProofFixture =
+  only === 'all' || only === 'engine' ? await generateEngineMerkleProofFixture() : null;
 
 const outputs = [];
 if (only === 'all' || only === 'circomlibjs') {
@@ -119,6 +187,10 @@ if (only === 'all' || only === 'engine') {
   outputs.push([
     path.join(outDir, 'engine-txid.json'),
     JSON.stringify(generateEngineTxidVectors(), null, 2) + '\n',
+  ]);
+  outputs.push([
+    path.join(outDir, 'engine-txid-merkle-proof.json'),
+    JSON.stringify(engineMerkleProofFixture, null, 2) + '\n',
   ]);
 }
 
@@ -214,6 +286,33 @@ function generateEngineTxidVectors() {
   };
 }
 
+async function generateEngineMerkleProofFixture() {
+  const response = await fetch(ENGINE_PROOF_VECTOR_URL);
+  if (!response.ok) {
+    throw new Error(`failed to fetch engine proof vector: ${response.status} ${response.statusText}`);
+  }
+
+  const vector = await response.json();
+  return {
+    source: {
+      package: ENGINE_SOURCE.package,
+      packageVersion: ENGINE_SOURCE.packageVersion,
+      repo: ENGINE_SOURCE.repo,
+      referencePath: ENGINE_SOURCE.proofVectorPath,
+      rawUrl: ENGINE_PROOF_VECTOR_URL,
+    },
+    case: {
+      name: 'single_nullifier_single_commitment_proof',
+      railgunTxidHex: strip0x(vector.railgunTxidIfHasUnshield),
+      utxoTreeIn: Number(vector.utxoTreeIn),
+      globalTreePosition: Number(vector.utxoBatchGlobalStartPositionOut),
+      merkleRootHex: strip0x(vector.anyRailgunTxidMerklerootAfterTransaction),
+      indicesHex: strip0x(vector.railgunTxidMerkleProofIndices),
+      pathElementsHex: vector.railgunTxidMerkleProofPathElements.map(strip0x),
+    },
+  };
+}
+
 function padToThirteen(values) {
   const padded = [...values];
   while (padded.length < 13) {
@@ -228,6 +327,10 @@ function toDecimal(value) {
 
 function toHex(value) {
   return ByteUtils.nToHex(value, ByteLength.UINT_256);
+}
+
+function strip0x(value) {
+  return value.startsWith('0x') ? value.slice(2) : value;
 }
 
 function parseArgs(argv) {

@@ -226,6 +226,8 @@ fn full_round(state: &mut Vec<Fr>, round_constants: &[Fr], matrix: &[Vec<Fr>]) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use serde::Deserialize;
 
     use super::{
@@ -234,6 +236,7 @@ mod tests {
     };
     use num_bigint::BigUint;
     use num_traits::Num;
+    use railgun_types::bn254_scalar_field_modulus;
 
     #[derive(Deserialize)]
     struct CircomlibjsFixture {
@@ -374,12 +377,57 @@ mod tests {
     }
 
     #[test]
+    fn committed_poseidon_fixtures_include_expected_edge_cases() {
+        let circom_case_names = circomlibjs_fixture()
+            .cases
+            .iter()
+            .map(|test_case| test_case.name.as_str())
+            .collect::<BTreeSet<_>>();
+        let engine_case_names = engine_txid_fixture()
+            .cases
+            .iter()
+            .map(|test_case| test_case.name.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(
+            circom_case_names.contains("near_modulus_descending_arity_13"),
+            "circom fixture should include near-modulus arity-13 coverage"
+        );
+        assert!(
+            circom_case_names.contains("alternating_zero_one_arity_8"),
+            "circom fixture should include alternating-pattern coverage"
+        );
+        assert!(
+            engine_case_names.contains("empty_inputs"),
+            "engine fixture should include empty txid-side coverage"
+        );
+        assert!(
+            engine_case_names.contains("near_modulus_values"),
+            "engine fixture should include modulo-normalization coverage"
+        );
+    }
+
+    #[test]
     fn padded_txid_hash_rejects_more_than_thirteen_values() {
         let values = (0_u8..=13).map(BigUint::from).collect::<Vec<_>>();
 
         assert!(
             hash_padded_txid_fields(&values).is_err(),
             "txid padding helper should reject oversized inputs"
+        );
+    }
+
+    #[test]
+    fn txid_helpers_reduce_inputs_mod_field_order() {
+        let modulus = bn254_scalar_field_modulus();
+
+        let unreduced = vec![&modulus + BigUint::from(5_u8), (&modulus * BigUint::from(2_u8)) + BigUint::from(9_u8)];
+        let reduced = vec![BigUint::from(5_u8), BigUint::from(9_u8)];
+
+        assert_eq!(
+            hash_padded_txid_fields(&unreduced),
+            hash_padded_txid_fields(&reduced),
+            "txid helper should hash values after modulo field reduction"
         );
     }
 

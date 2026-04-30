@@ -161,10 +161,13 @@ Current generated fixture files:
 
 - `crates/railgun-core/testdata/poseidon/circomlibjs.json`
 - `crates/railgun-core/testdata/poseidon/engine-txid.json`
+- `crates/railgun-core/testdata/poseidon/engine-txid-merkle-proof.json`
 
 Current generators cover:
 
 - generic `circomlibjs` Poseidon vectors for curated arities and fixed input families
 - txid-specific vectors that mirror the public engine txid path, including the canonical Merkle zero, padded intermediate hashes, final txid, and txid-leaf hash
+
+Additional committed txid-related fixture data may also be checked in when the source is a stable public engine vector, such as the upstream txid Merkle proof example currently mirrored from `src/test/test-vector-poi.json`.
 
 Any new vectors committed here should still cite the exact public source file they were taken from or the exact script/oracle combination that generated them.
