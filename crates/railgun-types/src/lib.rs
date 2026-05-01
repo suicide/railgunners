@@ -12,6 +12,7 @@ mod keys;
 mod merkle;
 mod note;
 mod position;
+mod railgun_txid;
 mod shield_ciphertext;
 mod token;
 
@@ -53,5 +54,6 @@ pub use position::{
     GLOBAL_UTXO_TREE_UNSHIELD_EVENT_HARDCODED_VALUE, GlobalTreePosition, TREE_MAX_ITEMS,
     UtxoLeafCoordinate, UtxoTreeCoordinate,
 };
+pub use railgun_txid::{RAILGUN_TXID_INPUTS_LENGTH, RailgunTxid};
 pub use shield_ciphertext::{ShieldCiphertext, ShieldCiphertextBlock};
 pub use token::{Address, ChainId, TokenData, TokenHash, TokenSubId, TokenType, TxHash};

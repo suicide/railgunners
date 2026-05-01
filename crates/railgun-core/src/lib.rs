@@ -16,6 +16,7 @@ pub mod network_id;
 pub mod note;
 /// Canonical UTXO and txid position helpers.
 pub mod position;
+pub mod railgun_txid;
 pub mod shareable_viewing_key;
 pub mod shared_key;
 pub mod shield_ciphertext;
@@ -70,6 +71,9 @@ pub use position::{
     global_tree_position_pre_transaction_poi_proof,
     pre_transaction_poi_proof_hardcoded_leaf_position, pre_transaction_poi_proof_hardcoded_tree,
     unshield_event_hardcoded_leaf_position, unshield_event_hardcoded_tree,
+};
+pub use railgun_txid::{
+    RailgunTxidError, derive_commitments_hash, derive_nullifiers_hash, derive_railgun_txid,
 };
 pub use shareable_viewing_key::{
     ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
