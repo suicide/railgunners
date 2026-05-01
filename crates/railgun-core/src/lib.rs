@@ -74,6 +74,7 @@ pub use position::{
 };
 pub use railgun_txid::{
     RailgunTxidError, derive_commitments_hash, derive_nullifiers_hash, derive_railgun_txid,
+    derive_railgun_txid_leaf_hash, derive_verification_hash,
 };
 pub use shareable_viewing_key::{
     ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,

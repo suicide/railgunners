@@ -27,11 +27,44 @@ impl RailgunTxid {
     }
 }
 
+/// Typed 32-byte verification hash used for transaction-chain validation.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct VerificationHash([u8; 32]);
+
+impl VerificationHash {
+    /// Length of a verification hash in bytes.
+    pub const LENGTH: usize = 32;
+
+    /// Creates a verification hash from raw bytes.
+    #[must_use]
+    pub const fn new(bytes: [u8; Self::LENGTH]) -> Self {
+        Self(bytes)
+    }
+
+    /// Creates a verification hash from a byte slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `bytes` is not exactly 32 bytes long.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, ParseDomainError> {
+        let array: [u8; Self::LENGTH] = bytes
+            .try_into()
+            .map_err(|_| ParseDomainError::new("verification hash must be exactly 32 bytes"))?;
+        Ok(Self::new(array))
+    }
+
+    /// Returns the raw verification-hash bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use num_bigint::BigUint;
 
-    use super::{RAILGUN_TXID_INPUTS_LENGTH, RailgunTxid};
+    use super::{RAILGUN_TXID_INPUTS_LENGTH, RailgunTxid, VerificationHash};
     use crate::{BN254_SCALAR_FIELD_MODULUS_BYTES, ParseDomainError};
 
     #[test]
@@ -59,5 +92,23 @@ mod tests {
             error,
             ParseDomainError::new("railgun txid must fit within the BN254 scalar field")
         );
+    }
+
+    #[test]
+    fn verification_hash_round_trips_from_slice() {
+        let bytes = [7_u8; VerificationHash::LENGTH];
+        let hash = VerificationHash::from_slice(&bytes)
+            .unwrap_or_else(|error| panic!("verification hash bytes should parse: {error}"));
+
+        assert_eq!(hash.as_bytes(), &bytes);
+    }
+
+    #[test]
+    fn verification_hash_rejects_invalid_length() {
+        let Err(error) = VerificationHash::from_slice(&[7_u8; 31]) else {
+            panic!("invalid verification hash length should fail");
+        };
+
+        assert_eq!(error, ParseDomainError::new("verification hash must be exactly 32 bytes"));
     }
 }

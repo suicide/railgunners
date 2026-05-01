@@ -2,8 +2,10 @@
 
 use num_bigint::BigUint;
 use railgun_types::{
-    BoundParamsHash, NoteCommitment, Nullifier, RAILGUN_TXID_INPUTS_LENGTH, RailgunTxid,
+    BoundParamsHash, GlobalTreePosition, MerkleNodeHash, NoteCommitment, Nullifier,
+    RAILGUN_TXID_INPUTS_LENGTH, RailgunTxid, UtxoTreeCoordinate, VerificationHash,
 };
+use sha3::{Digest, Keccak256};
 
 use crate::crypto::poseidon;
 
@@ -61,6 +63,14 @@ fn bound_params_hash_value(
     poseidon::field_from_canonical_bytes(bound_params_hash.as_bytes())
         .map(poseidon::field_to_biguint)
         .map_err(|_| RailgunTxidError::InvalidBoundParamsHash)
+}
+
+fn biguint_to_bytes32(value: &BigUint) -> [u8; 32] {
+    let bytes = value.to_bytes_be();
+    let mut padded = [0_u8; 32];
+    let start = 32 - bytes.len();
+    padded[start..].copy_from_slice(&bytes);
+    padded
 }
 
 /// Derives the canonical padded nullifiers hash used by Railgun txid derivation.
@@ -123,14 +133,62 @@ pub fn derive_railgun_txid(
     RailgunTxid::new(hash).map_err(|_| RailgunTxidError::HashingFailure)
 }
 
+/// Derives the canonical txid-tree leaf hash for one Railgun transaction.
+///
+/// Input ordering is exactly `[railgunTxid, utxoTreeIn, globalTreePosition]`
+/// so the resulting leaf remains compatible with upstream txid Merkle proofs
+/// and POI linkage.
+///
+/// # Errors
+///
+/// Returns an error if Poseidon hashing fails unexpectedly.
+pub fn derive_railgun_txid_leaf_hash(
+    railgun_txid: &RailgunTxid,
+    utxo_tree_in: UtxoTreeCoordinate,
+    global_tree_position: GlobalTreePosition,
+) -> Result<MerkleNodeHash, RailgunTxidError> {
+    let hash = poseidon::hash_railgun_txid_leaf(
+        railgun_txid.value(),
+        u64::from(utxo_tree_in.as_u32()),
+        global_tree_position.get(),
+    )
+    .map_err(|_| RailgunTxidError::HashingFailure)?;
+
+    Ok(MerkleNodeHash::new(biguint_to_bytes32(&hash)))
+}
+
+/// Derives the canonical transaction verification hash.
+///
+/// Upstream chaining semantics use `keccak256(previousVerificationHash ||
+/// firstNullifier)` and treat a missing predecessor as empty bytes rather than a
+/// fixed 32-byte zero word.
+#[must_use]
+pub fn derive_verification_hash(
+    previous_verification_hash: Option<&VerificationHash>,
+    first_nullifier: &Nullifier,
+) -> VerificationHash {
+    let mut hasher = Keccak256::new();
+    if let Some(previous_verification_hash) = previous_verification_hash {
+        hasher.update(previous_verification_hash.as_bytes());
+    }
+    hasher.update(biguint_to_bytes32(first_nullifier.value()));
+
+    VerificationHash::new(hasher.finalize().into())
+}
+
 #[cfg(test)]
 mod tests {
     use num_bigint::BigUint;
-    use railgun_types::{BoundParamsHash, NoteCommitment, Nullifier, RailgunTxid};
+    use railgun_types::{
+        BoundParamsHash, MerkleNodeHash, NoteCommitment, Nullifier, RailgunTxid,
+        UtxoLeafCoordinate, UtxoTreeCoordinate, VerificationHash,
+    };
 
     use super::{
         RailgunTxidError, derive_commitments_hash, derive_nullifiers_hash, derive_railgun_txid,
+        derive_railgun_txid_leaf_hash, derive_verification_hash,
     };
+    use crate::global_tree_position;
 
     fn decode_hex<const N: usize>(value: &str) -> [u8; N] {
         let trimmed = value.strip_prefix("0x").unwrap_or(value);
@@ -162,6 +220,10 @@ mod tests {
     fn commitment(value: &str) -> NoteCommitment {
         NoteCommitment::new(biguint_from_hex(value))
             .unwrap_or_else(|error| panic!("commitment vector should construct: {error}"))
+    }
+
+    fn verification_hash(value: &str) -> VerificationHash {
+        VerificationHash::new(decode_hex::<32>(value))
     }
 
     #[test]
@@ -248,5 +310,90 @@ mod tests {
         };
 
         assert_eq!(error, RailgunTxidError::InvalidBoundParamsHash);
+    }
+
+    #[test]
+    fn derives_canonical_txid_leaf_hash_vector() {
+        let txid = RailgunTxid::new(biguint_from_hex(
+            "1ae0c257fc17cd7044ac5eebd9bcf0b9a0529557d584968d944cf37608dbf118",
+        ))
+        .unwrap_or_else(|error| panic!("txid vector should construct: {error}"));
+        let global_tree_position = global_tree_position(
+            UtxoTreeCoordinate::unshield_event_hardcoded(),
+            UtxoLeafCoordinate::unshield_event_hardcoded(),
+        )
+        .unwrap_or_else(|error| panic!("global tree position should compute: {error}"));
+
+        assert_eq!(
+            derive_railgun_txid_leaf_hash(
+                &txid,
+                UtxoTreeCoordinate::in_tree(0),
+                global_tree_position
+            )
+            .unwrap_or_else(|error| panic!("txid leaf hash should derive: {error}")),
+            MerkleNodeHash::new(decode_hex::<32>(
+                "2cc00a51c00d9596db52e05004438c7387608e2585b54127d75bdd79c3fff093",
+            ))
+        );
+    }
+
+    #[test]
+    fn txid_leaf_hash_depends_on_input_ordering() {
+        let txid = RailgunTxid::new(biguint_from_hex(
+            "018d6143a22e09c18ba2a713985bd1e43a095605d5d259d72d96da2cca604f3e",
+        ))
+        .unwrap_or_else(|error| panic!("txid should construct: {error}"));
+        let base_position =
+            global_tree_position(UtxoTreeCoordinate::in_tree(0), UtxoLeafCoordinate::in_tree(1))
+                .unwrap_or_else(|error| panic!("base global position should compute: {error}"));
+        let shifted_position =
+            global_tree_position(UtxoTreeCoordinate::in_tree(1), UtxoLeafCoordinate::in_tree(0))
+                .unwrap_or_else(|error| panic!("shifted global position should compute: {error}"));
+
+        let first =
+            derive_railgun_txid_leaf_hash(&txid, UtxoTreeCoordinate::in_tree(0), base_position)
+                .unwrap_or_else(|error| panic!("first txid leaf hash should derive: {error}"));
+        let second =
+            derive_railgun_txid_leaf_hash(&txid, UtxoTreeCoordinate::in_tree(1), shifted_position)
+                .unwrap_or_else(|error| panic!("second txid leaf hash should derive: {error}"));
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn derives_verification_hash_with_empty_predecessor() {
+        assert_eq!(
+            derive_verification_hash(
+                None,
+                &nullifier("1e52cee52f67c37a468458671cddde6b56390dcbdc4cf3b770badc0e78d66401"),
+            ),
+            verification_hash("099cd3ebcadaf6ff470d16bc0186fb5f26cd4103e9970effc9b6679478e11c72")
+        );
+    }
+
+    #[test]
+    fn derives_verification_hash_with_previous_chain_value() {
+        assert_eq!(
+            derive_verification_hash(
+                Some(&verification_hash(
+                    "099cd3ebcadaf6ff470d16bc0186fb5f26cd4103e9970effc9b6679478e11c72",
+                )),
+                &nullifier("26d7d0d235dc1849e9794061ebc74e9ea211b8b5004081d26c7d086bdd3c0c35"),
+            ),
+            verification_hash("63b79987230ed89bcfbaf94c72c42515f116057e2c2f5d19c5b47d094858e874")
+        );
+    }
+
+    #[test]
+    fn derives_verification_hash_for_nonzero_predecessor_vector() {
+        assert_eq!(
+            derive_verification_hash(
+                Some(&verification_hash(
+                    "7497bd492633825701d6eefc644139d236f46ef961936f0aa69b6751af14497b",
+                )),
+                &nullifier("000727631f24f543408350df5883261cd5ab89d191c43da1436824ce637328c4"),
+            ),
+            verification_hash("31972b456d6d34a379e8576ed2a51d097f4046438456653914460d5e346f9dd4")
+        );
     }
 }
