@@ -5,6 +5,7 @@ use num_bigint::BigUint;
 use railgun_types::{
     PackedSpendingPublicKey, SpendingPrivateKey, SpendingPublicKey, bn254_scalar_field_modulus,
 };
+use std::sync::OnceLock;
 
 use super::CryptoError;
 
@@ -35,6 +36,9 @@ const B8_Y: &str = "169501507984606577179586255678218345503016631616247077872228
 #[cfg(test)]
 const SUBGROUP_ORDER: &str =
     "2736030358979909402780800718157159386076813972158567259200215660948447373041";
+
+static D_CONSTANT: OnceLock<Fr> = OnceLock::new();
+static A_CONSTANT: OnceLock<Fr> = OnceLock::new();
 
 fn field_constant(value: &str) -> Fr {
     Fr::from_be_bytes_mod_order(
@@ -69,7 +73,7 @@ fn biguint_to_field(value: &BigUint) -> Result<Fr, CryptoError> {
 // OpenZeppelin uses the same value as `COEFF_D`:
 // https://github.com/OpenZeppelin/rust-contracts-stylus/blob/main/lib/crypto/src/curve/te/instance/baby_jubjub.rs#L65-L76
 fn d_constant() -> Fr {
-    field_constant("168696")
+    *D_CONSTANT.get_or_init(|| field_constant("168696"))
 }
 
 // circomlib-compatible BabyJubJub twisted Edwards `a` coefficient in the
@@ -78,7 +82,7 @@ fn d_constant() -> Fr {
 // OpenZeppelin uses the same value as `COEFF_A`:
 // https://github.com/OpenZeppelin/rust-contracts-stylus/blob/main/lib/crypto/src/curve/te/instance/baby_jubjub.rs#L65-L76
 fn a_constant() -> Fr {
-    field_constant("168700")
+    *A_CONSTANT.get_or_init(|| field_constant("168700"))
 }
 
 #[cfg(test)]
@@ -87,6 +91,7 @@ fn generator_point() -> Point {
 }
 
 fn b8_point() -> Point {
+    // P6: If key-derivation profiling shows this matters, cache Base8 as well.
     Point { x: field_constant(B8_X), y: field_constant(B8_Y) }
 }
 
@@ -286,9 +291,9 @@ mod tests {
     use railgun_types::{PackedSpendingPublicKey, SpendingPrivateKey};
 
     use super::{
-        SUBGROUP_ORDER, a_constant, b8_point, d_constant, derive_spending_public_key,
-        field_to_biguint, generator_point, is_identity, is_on_curve, pack_spending_public_key,
-        unpack_spending_public_key,
+        SUBGROUP_ORDER, a_constant, b8_point, compress_point, d_constant, decompress_point,
+        derive_spending_public_key, field_to_biguint, generator_point, is_identity, is_on_curve,
+        pack_spending_public_key, unpack_spending_public_key,
     };
 
     #[test]
@@ -366,6 +371,21 @@ mod tests {
             .unwrap_or_else(|_| panic!("unpacked spending public key should succeed"));
 
         assert_eq!(unpacked, public_key);
+    }
+
+    #[test]
+    fn round_trips_negative_x_point() {
+        let mut negative = generator_point();
+        negative.x = -negative.x;
+
+        assert!(is_on_curve(negative));
+
+        let packed = compress_point(negative);
+        let unpacked = decompress_point(packed.as_bytes())
+            .unwrap_or_else(|_| panic!("negative-x point should unpack successfully"));
+
+        assert_eq!(unpacked.x, negative.x);
+        assert_eq!(unpacked.y, negative.y);
     }
 
     fn hex_array<const N: usize>(value: &str) -> [u8; N] {

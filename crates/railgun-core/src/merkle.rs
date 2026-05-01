@@ -1,6 +1,4 @@
 //! Canonical Merkle proof creation and local verification.
-
-use num_bigint::BigUint;
 use railgun_types::{
     MerkleNodeHash, MerkleProof, MerkleProofElement, MerkleProofIndices, MerkleRoot, TREE_DEPTH,
 };
@@ -38,6 +36,11 @@ fn field_from_hash_bytes(bytes: &[u8; 32]) -> Result<ark_bn254::Fr, MerkleProofE
 
 fn merkle_node_hash_from_field(field: ark_bn254::Fr) -> MerkleNodeHash {
     MerkleNodeHash::new(poseidon::field_to_canonical_bytes(field))
+}
+
+fn test_bit(bytes: &[u8], index: usize) -> bool {
+    let byte_index = bytes.len() - 1 - (index / 8);
+    (bytes[byte_index] & (1 << (index % 8))) != 0
 }
 
 fn hash_left_right(
@@ -110,22 +113,21 @@ pub fn verify_merkle_proof(
 ) -> Result<bool, MerkleProofError> {
     let _ =
         field_from_hash_bytes(leaf.as_bytes()).map_err(|_| MerkleProofError::InvalidLeafHash)?;
-    let indices = BigUint::from_bytes_be(proof.indices().as_bytes());
+    let indices = proof.indices().as_bytes();
     let mut current = *leaf;
 
     for (index, element) in proof.elements().iter().enumerate() {
-        let bit_mask = BigUint::from(1_u8) << index;
         let sibling = MerkleNodeHash::new(*element.as_bytes());
 
         if field_from_hash_bytes(element.as_bytes()).is_err() {
             return Err(MerkleProofError::InvalidPathElement(index));
         }
 
-        current = if (&indices & &bit_mask) == BigUint::default() {
-            hash_pair(&current, &sibling)
+        current = if test_bit(indices, index) {
+            hash_pair(&sibling, &current)
                 .map_err(|_| MerkleProofError::InvalidPathElement(index))?
         } else {
-            hash_pair(&sibling, &current)
+            hash_pair(&current, &sibling)
                 .map_err(|_| MerkleProofError::InvalidPathElement(index))?
         };
     }
@@ -143,7 +145,7 @@ mod tests {
     use crate::crypto::poseidon;
 
     use super::{
-        MerkleNodeHash, MerkleProof, MerkleProofError, create_dummy_merkle_proof,
+        MerkleNodeHash, MerkleProof, MerkleProofError, create_dummy_merkle_proof, hash_pair,
         verify_merkle_proof,
     };
 
@@ -303,6 +305,42 @@ mod tests {
         };
 
         assert_eq!(error, MerkleProofError::InvalidLeafHash);
+    }
+
+    #[test]
+    fn verifies_proof_with_mixed_direction_bits() {
+        // This is a branch-semantics test for left/right path handling.
+        // Upstream parity remains covered by the committed engine proof vector.
+        let leaf = merkle_hash("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+        let zero = MerkleNodeHash::new([0_u8; 32]);
+        let mut current = leaf;
+        let mut elements = Vec::with_capacity(railgun_types::TREE_DEPTH);
+
+        for level in 0..railgun_types::TREE_DEPTH {
+            let sibling_is_left = ((3_u64 >> level) & 1) == 1;
+            current = if sibling_is_left {
+                hash_pair(&zero, &current)
+                    .unwrap_or_else(|error| panic!("mixed-direction path should hash: {error}"))
+            } else {
+                hash_pair(&current, &zero)
+                    .unwrap_or_else(|error| panic!("mixed-direction path should hash: {error}"))
+            };
+            elements.push(MerkleProofElement::new([0_u8; 32]));
+        }
+
+        let mut indices = [0_u8; 32];
+        indices[31] = 3;
+        let proof = MerkleProof::new(
+            MerkleRoot::new(*current.as_bytes()),
+            MerkleProofIndices::new(indices),
+            elements,
+        )
+        .unwrap_or_else(|error| panic!("mixed-direction proof should construct: {error}"));
+
+        assert!(
+            verify_merkle_proof(&leaf, &proof)
+                .unwrap_or_else(|error| panic!("mixed-direction proof should verify: {error}"))
+        );
     }
 
     fn engine_merkle_proof_fixture() -> &'static EngineMerkleProofFixture {

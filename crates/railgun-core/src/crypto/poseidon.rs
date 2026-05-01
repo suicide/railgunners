@@ -421,7 +421,10 @@ mod tests {
     fn txid_helpers_reduce_inputs_mod_field_order() {
         let modulus = bn254_scalar_field_modulus();
 
-        let unreduced = vec![&modulus + BigUint::from(5_u8), (&modulus * BigUint::from(2_u8)) + BigUint::from(9_u8)];
+        let unreduced = vec![
+            &modulus + BigUint::from(5_u8),
+            (&modulus * BigUint::from(2_u8)) + BigUint::from(9_u8),
+        ];
         let reduced = vec![BigUint::from(5_u8), BigUint::from(9_u8)];
 
         assert_eq!(
