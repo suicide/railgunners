@@ -15,6 +15,7 @@ mod position;
 mod railgun_txid;
 mod shield_ciphertext;
 mod token;
+mod transaction;
 
 pub use address::{
     ChainScope, ChainType, NetworkId, RailgunAddress, RailgunAddressData, RailgunChain,
@@ -57,3 +58,8 @@ pub use position::{
 pub use railgun_txid::{RAILGUN_TXID_INPUTS_LENGTH, RailgunTxid, VerificationHash};
 pub use shield_ciphertext::{ShieldCiphertext, ShieldCiphertextBlock};
 pub use token::{Address, ChainId, TokenData, TokenHash, TokenSubId, TokenType, TxHash};
+pub use transaction::{
+    CommitmentSummary, DecodedCommitmentCiphertextV2, DecodedCommitmentCiphertextV3, TxidVersion,
+    V2Transaction, V2TransactionBoundParams, V3Transaction, V3TransactionBoundParams,
+    V3TransactionBoundParamsLocal, VersionedTransaction,
+};

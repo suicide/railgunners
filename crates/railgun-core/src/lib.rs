@@ -21,6 +21,7 @@ pub mod shareable_viewing_key;
 pub mod shared_key;
 pub mod shield_ciphertext;
 pub mod token;
+pub mod transaction_commitment;
 
 use railgun_types::{Address, ChainId, TxHash};
 
@@ -87,6 +88,7 @@ pub use shield_ciphertext::{
     ShieldCiphertextError, decrypt_shield_random, parse_shield_ciphertext,
 };
 pub use token::{CanonicalTokenData, derive_token_hash, encode_token_data};
+pub use transaction_commitment::{TransactionCommitmentError, extract_commitment_summary};
 
 /// Result alias used across foundational crates.
 pub type Result<T, E = RailgunError> = core::result::Result<T, E>;
