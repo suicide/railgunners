@@ -7,6 +7,7 @@ mod ciphertext_v2;
 mod ciphertext_v3;
 mod commitment_ciphertext;
 mod error;
+mod event;
 mod field;
 mod keys;
 mod merkle;
@@ -32,6 +33,13 @@ pub use commitment_ciphertext::{
     CommitmentCiphertextV2, CommitmentCiphertextV3, VersionedCommitmentCiphertext,
 };
 pub use error::ParseDomainError;
+pub use event::{
+    AccumulatorTransactionIndex, BlockNumber, EventLogIndex, SenderCiphertext, ShieldCommitment,
+    ShieldPreimage, TransactCommitmentBatchIndex, UnshieldData, V2Commitment, V2CommitmentEvent,
+    V2NullifierEvent, V2TransactCommitment, V2UnshieldEvent, V3Commitment, V3CommitmentEvent,
+    V3NullifierEvent, V3TransactCommitment, V3TransactionEvent, V3TransactionUnshieldData,
+    V3UnshieldEvent, VersionedCommitmentEvent, VersionedNullifierEvent, VersionedUnshieldEvent,
+};
 pub(crate) use field::validate_bn254_scalar;
 pub use field::{BN254_SCALAR_FIELD_MODULUS_BYTES, bn254_scalar_field_modulus};
 pub use keys::{

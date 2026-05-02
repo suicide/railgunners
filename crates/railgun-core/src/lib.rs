@@ -9,6 +9,7 @@ pub mod ciphertext_v2;
 pub mod ciphertext_v3;
 pub mod commitment_ciphertext;
 mod crypto;
+pub mod event;
 pub mod hd;
 pub mod keys;
 pub mod merkle;
@@ -46,6 +47,18 @@ pub use ciphertext_v3::{
 };
 pub use commitment_ciphertext::{
     CommitmentCiphertextError, parse_commitment_ciphertext_v2, parse_commitment_ciphertext_v3,
+};
+pub use event::{
+    DecodedCommitmentEventInput, DecodedNullifierEventInput, DecodedShieldCiphertextInput,
+    DecodedShieldPreimageInput, DecodedTokenDataInput, DecodedUnshieldEventInput,
+    DecodedV2CommitmentCiphertextInput, DecodedV3CommitmentCiphertextInput, EventError,
+    V2NullifierEventInput, V2ShieldEventInput, V2TransactEventInput, V2UnshieldEventInput,
+    V3NullifierEventInput, V3TransactEventInput, V3TransactionEventInput,
+    V3TransactionUnshieldDataInput, V3UnshieldEventInput, decode_commitment_event,
+    decode_nullifier_event, decode_unshield_event, decode_v2_nullifier_event,
+    decode_v2_shield_event, decode_v2_transact_event, decode_v2_unshield_event,
+    decode_v3_nullifier_event, decode_v3_transact_event, decode_v3_transaction_event,
+    decode_v3_unshield_event,
 };
 pub use hd::{
     DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,
