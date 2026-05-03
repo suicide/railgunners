@@ -22,6 +22,9 @@ pub(crate) enum Command {
     /// Derive and inspect Railgun keys.
     #[command(subcommand)]
     Keys(KeysCommand),
+    /// Inspect and verify local proving artifacts.
+    #[command(subcommand)]
+    Artifacts(ArtifactsCommand),
     /// Create and inspect shareable viewing keys.
     #[command(subcommand)]
     ViewingKey(ViewingKeyCommand),
@@ -153,6 +156,28 @@ pub(crate) enum KeysCommand {
         /// The nullifying key as unsigned decimal.
         #[arg(long = "nullifying-key")]
         nullifying_key: String,
+        /// Emit stable machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum ArtifactsCommand {
+    /// Verify local artifacts against the canonical SHA-256 catalog.
+    Verify {
+        /// Canonical variant string such as `01x01` or `POI_3x3`.
+        #[arg(long)]
+        variant: String,
+        /// Local path to the decompressed zkey artifact.
+        #[arg(long)]
+        zkey: String,
+        /// Optional local path to the decompressed wasm artifact.
+        #[arg(long)]
+        wasm: Option<String>,
+        /// Optional local path to the decompressed dat artifact.
+        #[arg(long)]
+        dat: Option<String>,
         /// Emit stable machine-readable output.
         #[arg(long)]
         json: bool,

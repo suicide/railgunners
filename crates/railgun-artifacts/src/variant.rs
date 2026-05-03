@@ -130,6 +130,43 @@ impl core::fmt::Display for ArtifactVariant {
     }
 }
 
+impl core::str::FromStr for ArtifactVariant {
+    type Err = ArtifactError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        parse_artifact_variant(value)
+    }
+}
+
+/// Parses a canonical artifact variant string into a typed variant.
+///
+/// # Errors
+///
+/// Returns an error when the variant string is not one of the supported canonical
+/// standard or POI shapes.
+pub fn parse_artifact_variant(value: &str) -> Result<ArtifactVariant, ArtifactError> {
+    if value == "POI_3x3" {
+        return resolve_poi_variant(3, 3);
+    }
+    if value == "POI_13x13" {
+        return resolve_poi_variant(13, 13);
+    }
+
+    let Some((n_inputs, n_outputs)) = value.split_once('x') else {
+        return Err(ArtifactError::UnknownArtifactVariant(value.to_owned()));
+    };
+
+    let Ok(n_inputs) = n_inputs.parse::<u8>() else {
+        return Err(ArtifactError::UnknownArtifactVariant(value.to_owned()));
+    };
+    let Ok(n_outputs) = n_outputs.parse::<u8>() else {
+        return Err(ArtifactError::UnknownArtifactVariant(value.to_owned()));
+    };
+
+    resolve_standard_variant(n_inputs, n_outputs)
+        .map_err(|_| ArtifactError::UnknownArtifactVariant(value.to_owned()))
+}
+
 /// Resolves a canonical standard circuit artifact variant.
 ///
 /// # Errors
@@ -161,8 +198,8 @@ const fn is_supported_standard_shape(n_inputs: u8, n_outputs: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArtifactError, ArtifactVariant, PoiCircuitShape, StandardCircuitShape, resolve_poi_variant,
-        resolve_standard_variant,
+        ArtifactError, ArtifactVariant, PoiCircuitShape, StandardCircuitShape,
+        parse_artifact_variant, resolve_poi_variant, resolve_standard_variant,
     };
 
     #[test]
@@ -230,5 +267,28 @@ mod tests {
 
         assert_eq!(ArtifactVariant::Standard(standard).family(), super::CircuitFamily::Standard);
         assert_eq!(ArtifactVariant::Poi(poi).family(), super::CircuitFamily::Poi);
+    }
+
+    #[test]
+    fn parses_supported_variant_strings() {
+        let Ok(standard) = parse_artifact_variant("01x01") else {
+            panic!("expected standard variant string to parse");
+        };
+        let Ok(poi) = parse_artifact_variant("POI_3x3") else {
+            panic!("expected poi variant string to parse");
+        };
+
+        assert_eq!(standard.to_string(), "01x01");
+        assert_eq!(poi.to_string(), "POI_3x3");
+    }
+
+    #[test]
+    fn rejects_unknown_variant_strings() {
+        for value in ["", "poi_3x3", "abc", "11x02", "1x1x1"] {
+            let Err(error) = parse_artifact_variant(value) else {
+                panic!("expected invalid variant string {value} to fail");
+            };
+            assert_eq!(error, ArtifactError::UnknownArtifactVariant(value.to_owned()));
+        }
     }
 }

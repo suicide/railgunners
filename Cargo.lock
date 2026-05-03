@@ -1685,6 +1685,11 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 [[package]]
 name = "railgun-artifacts"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
 
 [[package]]
 name = "railgun-cli"
@@ -1693,6 +1698,7 @@ dependencies = [
  "clap",
  "hex",
  "num-bigint",
+ "railgun-artifacts",
  "railgun-core",
  "railgun-types",
  "serde",
