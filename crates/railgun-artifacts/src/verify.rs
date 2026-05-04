@@ -20,6 +20,16 @@ pub struct ArtifactFileVerification {
 }
 
 impl ArtifactFileVerification {
+    pub(crate) fn new(
+        kind: ArtifactFileKind,
+        path: PathBuf,
+        expected_hash: String,
+        actual_hash: String,
+        ok: bool,
+    ) -> Self {
+        Self { kind, path, expected_hash, actual_hash, ok }
+    }
+
     /// Returns the verified file kind.
     #[must_use]
     pub const fn kind(&self) -> ArtifactFileKind {
@@ -60,6 +70,14 @@ pub struct ArtifactVerificationFiles {
 }
 
 impl ArtifactVerificationFiles {
+    pub(crate) fn new(
+        zkey: ArtifactFileVerification,
+        wasm: Option<ArtifactFileVerification>,
+        dat: Option<ArtifactFileVerification>,
+    ) -> Self {
+        Self { zkey, wasm, dat }
+    }
+
     /// Returns the `zkey` verification result.
     #[must_use]
     pub fn zkey(&self) -> &ArtifactFileVerification {
@@ -88,6 +106,14 @@ pub struct ArtifactVerificationResult {
 }
 
 impl ArtifactVerificationResult {
+    pub(crate) fn new(
+        variant: ArtifactVariant,
+        files: ArtifactVerificationFiles,
+        ok: bool,
+    ) -> Self {
+        Self { variant, files, ok }
+    }
+
     /// Returns the verified artifact variant.
     #[must_use]
     pub const fn variant(&self) -> ArtifactVariant {
@@ -125,13 +151,9 @@ pub fn verify_artifact_file(
     let expected_hash = hashes.expected_hash(kind).to_owned();
     let actual_hash = sha256_hex(&bytes);
 
-    Ok(ArtifactFileVerification {
-        kind,
-        path: path.to_path_buf(),
-        expected_hash: expected_hash.clone(),
-        ok: actual_hash == expected_hash,
-        actual_hash,
-    })
+    let ok = actual_hash == expected_hash;
+
+    Ok(ArtifactFileVerification::new(kind, path.to_path_buf(), expected_hash, actual_hash, ok))
 }
 
 /// Verifies a local artifact set against the canonical hash catalog.
@@ -162,11 +184,11 @@ pub fn verify_local_artifacts(
         && wasm.as_ref().is_none_or(ArtifactFileVerification::ok)
         && dat.as_ref().is_none_or(ArtifactFileVerification::ok);
 
-    Ok(ArtifactVerificationResult {
-        variant: *variant,
-        files: ArtifactVerificationFiles { zkey, wasm, dat },
+    Ok(ArtifactVerificationResult::new(
+        *variant,
+        ArtifactVerificationFiles::new(zkey, wasm, dat),
         ok,
-    })
+    ))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

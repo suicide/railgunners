@@ -41,6 +41,36 @@ pub enum ArtifactError {
         /// The attempted path.
         path: PathBuf,
     },
+    /// A download configuration was malformed or incomplete.
+    InvalidDownloadConfiguration(&'static str),
+    /// A remote artifact download failed.
+    ArtifactDownloadFailed {
+        /// The attempted URL.
+        url: String,
+        /// Optional HTTP status code when available.
+        status_code: Option<u16>,
+    },
+    /// A Brotli-compressed artifact could not be decompressed.
+    ArtifactDecompressionFailed {
+        /// The compressed artifact kind.
+        kind: ArtifactFileKind,
+    },
+    /// The local artifact cache could not be written safely.
+    ArtifactCacheWriteFailed {
+        /// The attempted final path.
+        path: PathBuf,
+    },
+    /// A downloaded artifact failed canonical hash verification.
+    ArtifactVerificationFailed {
+        /// The verified artifact kind.
+        kind: ArtifactFileKind,
+        /// The verified file path.
+        path: PathBuf,
+        /// The canonical expected SHA-256 hash.
+        expected_hash: String,
+        /// The actual SHA-256 hash computed from disk.
+        actual_hash: String,
+    },
 }
 
 impl core::fmt::Display for ArtifactError {
@@ -67,6 +97,24 @@ impl core::fmt::Display for ArtifactError {
             Self::ArtifactReadFailed { path } => {
                 write!(formatter, "failed to read artifact file: {}", path.display())
             }
+            Self::InvalidDownloadConfiguration(message) => formatter.write_str(message),
+            Self::ArtifactDownloadFailed { url, status_code } => match status_code {
+                Some(status_code) => {
+                    write!(formatter, "failed to download artifact from {url}: HTTP {status_code}")
+                }
+                None => write!(formatter, "failed to download artifact from {url}"),
+            },
+            Self::ArtifactDecompressionFailed { kind } => {
+                write!(formatter, "failed to decompress Brotli artifact: {kind}")
+            }
+            Self::ArtifactCacheWriteFailed { path } => {
+                write!(formatter, "failed to write artifact cache file: {}", path.display())
+            }
+            Self::ArtifactVerificationFailed { kind, path, expected_hash, actual_hash } => write!(
+                formatter,
+                "artifact verification failed for {kind} at {}: expected {expected_hash}, got {actual_hash}",
+                path.display()
+            ),
         }
     }
 }

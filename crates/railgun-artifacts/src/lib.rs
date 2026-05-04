@@ -1,8 +1,11 @@
 //! Optional artifact selection and source abstractions for RAILGUN proving assets.
 //!
 //! This crate resolves canonical circuit variants and storage layout metadata without
-//! coupling callers to any built-in download or decompression behavior.
+//! coupling callers to built-in download or decompression behavior unless the optional
+//! `download` feature is enabled.
 
+#[cfg(feature = "download")]
+mod download;
 mod error;
 mod hash;
 mod layout;
@@ -11,6 +14,11 @@ mod source;
 mod variant;
 mod verify;
 
+#[cfg(feature = "download")]
+pub use download::{
+    ArtifactBackend, ArtifactDownloadConfig, ArtifactDownloadResult, ArtifactRemoteSource,
+    ArtifactRemoteUrls, DownloadedArtifactFiles, download_artifacts,
+};
 pub use error::ArtifactError;
 pub use hash::{ArtifactFileKind, ArtifactHashes, canonical_artifact_hashes};
 pub use layout::{
