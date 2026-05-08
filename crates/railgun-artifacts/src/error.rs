@@ -41,6 +41,12 @@ pub enum ArtifactError {
         /// The attempted path.
         path: PathBuf,
     },
+    /// Loaded artifact bundle inputs were malformed or unsupported.
+    InvalidLoadedArtifactBundle(&'static str),
+    /// The local `vkey.json` file could not be parsed as JSON.
+    ArtifactVkeyParseFailed,
+    /// The parsed `vkey.json` root was not a JSON object.
+    ArtifactVkeyInvalidShape,
     /// A download configuration was malformed or incomplete.
     InvalidDownloadConfiguration(&'static str),
     /// A remote artifact download failed.
@@ -82,9 +88,10 @@ impl core::fmt::Display for ArtifactError {
             Self::UnsupportedPoiShape { max_inputs, max_outputs } => {
                 write!(formatter, "unsupported POI circuit shape: {max_inputs}x{max_outputs}")
             }
-            Self::InvalidSourceConfiguration(message) | Self::InvalidVerificationInput(message) => {
-                formatter.write_str(message)
-            }
+            Self::InvalidSourceConfiguration(message)
+            | Self::InvalidVerificationInput(message)
+            | Self::InvalidLoadedArtifactBundle(message)
+            | Self::InvalidDownloadConfiguration(message) => formatter.write_str(message),
             Self::HashCatalogParseFailed => {
                 formatter.write_str("failed to parse canonical artifact hash catalog")
             }
@@ -97,7 +104,12 @@ impl core::fmt::Display for ArtifactError {
             Self::ArtifactReadFailed { path } => {
                 write!(formatter, "failed to read artifact file: {}", path.display())
             }
-            Self::InvalidDownloadConfiguration(message) => formatter.write_str(message),
+            Self::ArtifactVkeyParseFailed => {
+                formatter.write_str("failed to parse artifact verification key JSON")
+            }
+            Self::ArtifactVkeyInvalidShape => {
+                formatter.write_str("artifact verification key JSON must be a JSON object")
+            }
             Self::ArtifactDownloadFailed { url, status_code } => match status_code {
                 Some(status_code) => {
                     write!(formatter, "failed to download artifact from {url}: HTTP {status_code}")

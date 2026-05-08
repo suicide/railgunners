@@ -9,34 +9,14 @@ use std::{
 use tempfile::NamedTempFile;
 
 use crate::{
-    ArtifactError, ArtifactFileKind, ArtifactSource, ArtifactVariant, ArtifactVerificationResult,
-    LocalArtifactSource, ResolvedArtifactPaths, resolve_artifact_layout, verify_local_artifacts,
+    ArtifactBackend, ArtifactError, ArtifactFileKind, ArtifactSource, ArtifactVariant,
+    ArtifactVerificationResult, LocalArtifactSource, ResolvedArtifactPaths,
+    resolve_artifact_layout, verify_local_artifacts,
 };
 
 const DEFAULT_GATEWAY_BASE_URL: &str = "https://ipfs-lb.com";
 const DEFAULT_STANDARD_CID: &str = "QmUsmnK4PFc7zDp2cmC4wBZxYLjNyRgWfs5GNcJJ2uLcpU";
 const DEFAULT_POI_CID: &str = "QmZrP9zaZw2LwErT2yA6VpMWm65UdToQiKj4DtStVsUJHr";
-
-/// Requested backend artifacts for download and verification.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ArtifactBackend {
-    /// Download and verify `wasm` only.
-    Wasm,
-    /// Download and verify `dat` only.
-    Native,
-    /// Download and verify both `wasm` and `dat`.
-    Both,
-}
-
-impl ArtifactBackend {
-    const fn include_wasm(self) -> bool {
-        matches!(self, Self::Wasm | Self::Both)
-    }
-
-    const fn include_dat(self) -> bool {
-        matches!(self, Self::Native | Self::Both)
-    }
-}
 
 /// Remote artifact source configuration for canonical downloads.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -128,17 +108,17 @@ impl ArtifactRemoteSource {
                 zkey: format!("{base}circuits/{variant_string}/zkey.br"),
                 vkey: format!("{base}circuits/{variant_string}/vkey.json"),
                 wasm: backend
-                    .include_wasm()
+                    .includes_wasm()
                     .then(|| format!("{base}prover/snarkjs/{variant_string}.wasm.br")),
                 dat: backend
-                    .include_dat()
+                    .includes_dat()
                     .then(|| format!("{base}prover/native/{variant_string}.dat.br")),
             },
             crate::CircuitFamily::Poi => ArtifactRemoteUrls {
                 zkey: format!("{base}{variant_string}/zkey.br"),
                 vkey: format!("{base}{variant_string}/vkey.json"),
-                wasm: backend.include_wasm().then(|| format!("{base}{variant_string}/wasm.br")),
-                dat: backend.include_dat().then(|| format!("{base}{variant_string}/dat.br")),
+                wasm: backend.includes_wasm().then(|| format!("{base}{variant_string}/wasm.br")),
+                dat: backend.includes_dat().then(|| format!("{base}{variant_string}/dat.br")),
             },
         }
     }
@@ -273,8 +253,8 @@ impl DownloadedArtifactFiles {
             directory: paths.directory().to_path_buf(),
             zkey_path: paths.zkey_path().to_path_buf(),
             vkey_path: paths.vkey_path().to_path_buf(),
-            wasm_path: backend.include_wasm().then(|| paths.wasm_path().to_path_buf()),
-            dat_path: backend.include_dat().then(|| paths.dat_path().to_path_buf()),
+            wasm_path: backend.includes_wasm().then(|| paths.wasm_path().to_path_buf()),
+            dat_path: backend.includes_dat().then(|| paths.dat_path().to_path_buf()),
         }
     }
 }
@@ -381,7 +361,7 @@ fn download_into_temp_files(
         paths.directory(),
     )?;
     let vkey = download_uncompressed_file(urls.vkey_url(), paths.vkey_path(), paths.directory())?;
-    let wasm = if backend.include_wasm() {
+    let wasm = if backend.includes_wasm() {
         let wasm_url = urls.wasm_url().ok_or(ArtifactError::InvalidDownloadConfiguration(
             "artifact backend requires a wasm download URL",
         ))?;
@@ -394,7 +374,7 @@ fn download_into_temp_files(
     } else {
         None
     };
-    let dat = if backend.include_dat() {
+    let dat = if backend.includes_dat() {
         let dat_url = urls.dat_url().ok_or(ArtifactError::InvalidDownloadConfiguration(
             "artifact backend requires a dat download URL",
         ))?;
@@ -514,13 +494,13 @@ fn persist_downloaded_files(
     persist_one(temp_files.zkey, paths.zkey_path())?;
     persist_one(temp_files.vkey, paths.vkey_path())?;
 
-    if backend.include_wasm() {
+    if backend.includes_wasm() {
         let wasm = temp_files.wasm.ok_or(ArtifactError::InvalidDownloadConfiguration(
             "artifact backend requires a downloaded wasm file",
         ))?;
         persist_one(wasm, paths.wasm_path())?;
     }
-    if backend.include_dat() {
+    if backend.includes_dat() {
         let dat = temp_files.dat.ok_or(ArtifactError::InvalidDownloadConfiguration(
             "artifact backend requires a downloaded dat file",
         ))?;
