@@ -53,7 +53,14 @@
           overlays = [ self.overlays.default ];
         };
         craneLib = (crane.mkLib pkgs).overrideToolchain pkgs.rustToolchain;
-        src = craneLib.cleanCargoSource ./.;
+        src = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter = path: type:
+            (craneLib.filterCargoSources path type)
+            || (pkgs.lib.hasInfix "/crates/railgun-artifacts/data/" path)
+            || (pkgs.lib.hasInfix "/crates/railgun-core/testdata/poseidon/" path)
+            || (pkgs.lib.hasInfix "/crates/railgun-core/src/crypto/poseidon/" path);
+        };
         commonArgs = {
           pname = "railgun-rs";
           version = "0.1.0";
