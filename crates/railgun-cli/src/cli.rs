@@ -71,6 +71,36 @@ pub(crate) enum AddressCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Search for an all-chains index-0 0zk address smaller than a target set.
+    SearchLower {
+        /// One or more target addresses. The search matches addresses smaller than the minimum.
+        #[arg(long = "target-address", required = true)]
+        target_addresses: Vec<String>,
+        /// Number of BIP-39 words to generate.
+        #[arg(long = "word-count", default_value_t = 12)]
+        word_count: usize,
+        /// The canonical Railgun wallet index.
+        #[arg(long, default_value_t = 0)]
+        index: u32,
+        /// Optional required suffix after the `0zk1` prefix.
+        #[arg(long = "required-suffix")]
+        required_suffix: Option<String>,
+        /// Number of worker threads to run concurrently.
+        #[arg(long)]
+        jobs: Option<usize>,
+        /// Emit progress every N attempts on stderr. Defaults to 0 for no progress output.
+        #[arg(long = "progress-every", default_value_t = 0)]
+        progress_every: u64,
+        /// Optional global attempt cap across all workers.
+        #[arg(long = "max-attempts")]
+        max_attempts: Option<u64>,
+        /// Explicitly allow secret-bearing output.
+        #[arg(long)]
+        show_secrets: bool,
+        /// Emit stable machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

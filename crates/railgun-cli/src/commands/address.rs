@@ -2,9 +2,14 @@ use crate::{
     cli::AddressCommand,
     error::CliError,
     output::write_json,
-    parse::{parse_chain_scope, parse_master_public_key, parse_viewing_public_key},
+    parse::{
+        parse_address, parse_chain_scope, parse_master_public_key, parse_required_suffix,
+        parse_viewing_public_key,
+    },
     workflows::address::{DecodedAddress, decode_address, encode_address, validate_address},
+    workflows::address_search::{AddressSearchMatch, AddressSearchOptions, search_lower_address},
 };
+use railgun_core::Bip39WordCount;
 use railgun_types::ChainScope;
 use serde::Serialize;
 use std::io::Write;
@@ -60,9 +65,66 @@ pub(crate) fn execute(command: AddressCommand, stdout: &mut dyn Write) -> Result
                 return Err(CliError::command(error.to_string(), false));
             }
         },
+        AddressCommand::SearchLower {
+            target_addresses,
+            word_count,
+            index,
+            required_suffix,
+            jobs,
+            progress_every,
+            max_attempts,
+            show_secrets,
+            json,
+        } => {
+            if !show_secrets {
+                return Err(CliError::command(
+                    "address search requires --show-secrets".to_owned(),
+                    json,
+                ));
+            }
+
+            let word_count = Bip39WordCount::try_from(word_count).map_err(|error| {
+                CliError::command(format!("invalid --word-count value: {error}"), json)
+            })?;
+            let target_addresses = target_addresses
+                .iter()
+                .map(|address| parse_address(address, json))
+                .collect::<Result<Vec<_>, _>>()?;
+            let required_suffix = required_suffix
+                .as_deref()
+                .map(|suffix| parse_required_suffix(suffix, json))
+                .transpose()?;
+            let worker_count = jobs.unwrap_or_else(default_worker_count);
+            if worker_count == 0 {
+                return Err(CliError::command("--jobs must be at least 1".to_owned(), json));
+            }
+
+            let result = search_lower_address(
+                AddressSearchOptions {
+                    target_addresses,
+                    word_count,
+                    index,
+                    required_suffix,
+                    worker_count,
+                    progress_every,
+                    max_attempts,
+                },
+                json,
+            )?;
+
+            if json {
+                write_json(stdout, &SearchLowerJson::from_match(&result))?;
+            } else {
+                write_text_search_lower(stdout, &result)?;
+            }
+        }
     }
 
     Ok(())
+}
+
+fn default_worker_count() -> usize {
+    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
 }
 
 fn write_text_decoded(stdout: &mut dyn Write, decoded: &DecodedAddress) -> Result<(), CliError> {
@@ -87,6 +149,26 @@ fn format_master_public_key_hex(decoded: &DecodedAddress) -> String {
     let offset = padded.len() - bytes.len();
     padded[offset..].copy_from_slice(&bytes);
     hex::encode(padded)
+}
+
+fn write_text_search_lower(
+    stdout: &mut dyn Write,
+    result: &AddressSearchMatch,
+) -> Result<(), CliError> {
+    writeln!(stdout, "Found matching address after {} attempts.", result.attempts())?;
+    writeln!(stdout, "minimumTargetAddress: {}", result.minimum_target_address().as_str())?;
+    writeln!(stdout, "derivedAddress: {}", result.derived_address().as_str())?;
+    writeln!(stdout, "mnemonic: {}", result.mnemonic())?;
+    writeln!(stdout, "index: {}", result.index())?;
+    writeln!(stdout, "wordCount: {}", result.word_count())?;
+    if let Some(required_suffix) = result.required_suffix() {
+        writeln!(stdout, "requiredSuffix: {required_suffix}")?;
+    }
+    writeln!(stdout, "viewingPrivateKey: {}", result.viewing_private_key_hex())?;
+    writeln!(stdout, "packedSpendingPublicKey: {}", result.packed_spending_public_key_hex())?;
+    writeln!(stdout, "shareableViewingKey: {}", result.shareable_viewing_key())?;
+    writeln!(stdout, "workerCount: {}", result.worker_count())?;
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -173,6 +255,47 @@ impl ValidatedAddressJson {
 struct ValidationErrorJson {
     valid: bool,
     error: String,
+}
+
+#[derive(Serialize)]
+struct SearchLowerJson<'a> {
+    #[serde(rename = "minimumTargetAddress")]
+    minimum_target_address: &'a str,
+    #[serde(rename = "derivedAddress")]
+    derived_address: &'a str,
+    mnemonic: &'a str,
+    index: u32,
+    #[serde(rename = "wordCount")]
+    word_count: usize,
+    #[serde(rename = "requiredSuffix", skip_serializing_if = "Option::is_none")]
+    required_suffix: Option<&'a str>,
+    #[serde(rename = "viewingPrivateKey")]
+    viewing_private_key: &'a str,
+    #[serde(rename = "packedSpendingPublicKey")]
+    packed_spending_public_key: &'a str,
+    #[serde(rename = "shareableViewingKey")]
+    shareable_viewing_key: &'a str,
+    attempts: u64,
+    #[serde(rename = "workerCount")]
+    worker_count: usize,
+}
+
+impl<'a> SearchLowerJson<'a> {
+    fn from_match(result: &'a AddressSearchMatch) -> Self {
+        Self {
+            minimum_target_address: result.minimum_target_address().as_str(),
+            derived_address: result.derived_address().as_str(),
+            mnemonic: result.mnemonic(),
+            index: result.index(),
+            word_count: result.word_count(),
+            required_suffix: result.required_suffix(),
+            viewing_private_key: result.viewing_private_key_hex(),
+            packed_spending_public_key: result.packed_spending_public_key_hex(),
+            shareable_viewing_key: result.shareable_viewing_key(),
+            attempts: result.attempts(),
+            worker_count: result.worker_count(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -310,5 +433,81 @@ mod tests {
             String::from_utf8_lossy(&stderr),
             "chain selection requires both --chain-type and --chain-id\n"
         );
+    }
+
+    #[test]
+    fn search_lower_requires_show_secrets() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railguncli",
+                "address",
+                "search-lower",
+                "--target-address",
+                "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(String::from_utf8_lossy(&stderr), "address search requires --show-secrets\n");
+    }
+
+    #[test]
+    fn search_lower_rejects_invalid_required_suffix() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railguncli",
+                "address",
+                "search-lower",
+                "--target-address",
+                "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca",
+                "--required-suffix",
+                "0zk1bad",
+                "--show-secrets",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            "invalid required suffix: suffix must use only Bech32 lowercase payload characters and must not include the 0zk1 prefix\n"
+        );
+    }
+
+    #[test]
+    fn search_lower_reports_capped_failure_as_json() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railguncli",
+                "address",
+                "search-lower",
+                "--target-address",
+                "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca",
+                "--max-attempts",
+                "0",
+                "--show-secrets",
+                "--json",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert_eq!(
+            String::from_utf8_lossy(&stdout),
+            "{\"error\":\"no matching address found in 0 attempts\"}\n"
+        );
+        assert!(stderr.is_empty());
     }
 }

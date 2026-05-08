@@ -1,6 +1,6 @@
 use num_bigint::BigUint;
 use railgun_types::{
-    ChainScope, ChainType, MasterPublicKey, PackedSpendingPublicKey, RailgunChain,
+    ChainScope, ChainType, MasterPublicKey, PackedSpendingPublicKey, RailgunAddress, RailgunChain,
     SpendingPrivateKey, ViewingPrivateKey, ViewingPublicKey,
 };
 
@@ -60,6 +60,10 @@ pub(crate) fn parse_master_public_key(
         .map_err(|error| CliError::command(error.to_string(), json))
 }
 
+pub(crate) fn parse_address(value: &str, json: bool) -> Result<RailgunAddress, CliError> {
+    RailgunAddress::parse(value).map_err(|error| CliError::command(error.to_string(), json))
+}
+
 pub(crate) fn parse_decimal_biguint(
     value: &str,
     label: &str,
@@ -89,4 +93,22 @@ pub(crate) fn parse_chain_scope(
             json,
         )),
     }
+}
+
+pub(crate) fn parse_required_suffix(value: &str, json: bool) -> Result<String, CliError> {
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+
+    if value.bytes().all(
+        |byte| matches!(byte, b'0' | b'2'..=b'9' | b'a' | b'c'..=b'h' | b'j'..=b'n' | b'p'..=b'z'),
+    ) {
+        return Ok(value.to_owned());
+    }
+
+    Err(CliError::command(
+        "invalid required suffix: suffix must use only Bech32 lowercase payload characters and must not include the 0zk1 prefix"
+            .to_owned(),
+        json,
+    ))
 }
