@@ -1956,6 +1956,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "railgun-prover"
+version = "0.1.0"
+dependencies = [
+ "railgun-artifacts",
+ "serde_json",
+]
+
+[[package]]
 name = "railgun-types"
 version = "0.1.0"
 dependencies = [

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/railgun-artifacts",
+    "crates/railgun-prover",
     "crates/railgun-types",
     "crates/railgun-core",
     "crates/railgun-wasm",
@@ -18,6 +19,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 railgun-artifacts = { path = "crates/railgun-artifacts" }
+railgun-prover = { path = "crates/railgun-prover" }
 railgun-types = { path = "crates/railgun-types" }
 railgun-core = { path = "crates/railgun-core" }
 bech32 = "0.11.1"
