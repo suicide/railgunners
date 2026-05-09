@@ -10,6 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   security-events: write
 
@@ -36,12 +37,24 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,secret,config
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+
+      - name: Generate Trivy SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           format: sarif
           output: trivy-results.sarif
-          exit-code: "1"
+          exit-code: "0"
 
       - name: Upload Trivy SARIF
         if: always()
