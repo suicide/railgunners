@@ -68,31 +68,55 @@
           strictDeps = true;
         };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-      in
-      {
-        packages.default = craneLib.buildPackage (
-          commonArgs
+        workspaceCheckArgs = commonArgs // { inherit cargoArtifacts; };
+        cliPackage = craneLib.buildPackage (
+          workspaceCheckArgs
           // {
             inherit cargoArtifacts;
             pname = "railgun-cli";
             cargoExtraArgs = "-p railgun-cli";
           }
         );
+      in
+      {
+        packages = {
+          cli = cliPackage;
+          default = cliPackage;
+        }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          cli-container = pkgs.dockerTools.buildLayeredImage {
+            name = "suicide/rrscli";
+            tag = "latest";
+            contents = [
+              cliPackage
+              pkgs.cacert
+              pkgs.curl
+            ];
+            config = {
+              Cmd = [ "${cliPackage}/bin/railguncli" ];
+              Env = [
+                "PATH=/bin"
+                "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+              ];
+            };
+          };
+        };
 
         checks = {
-          build = self.packages.${system}.default;
+          build = cliPackage;
           clippy = craneLib.cargoClippy (
-            commonArgs
+            workspaceCheckArgs
             // {
-              inherit cargoArtifacts;
               cargoClippyExtraArgs = "--workspace --all-targets --all-features -- -D warnings";
             }
           );
+          tests = craneLib.cargoTest (workspaceCheckArgs // { cargoTestExtraArgs = "--workspace"; });
           fmt = craneLib.cargoFmt {
             inherit src;
             pname = "railgun-rs";
             version = "0.1.0";
           };
+          deny = craneLib.cargoDeny workspaceCheckArgs;
         };
 
         devShells.default = pkgs.mkShell {

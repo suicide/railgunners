@@ -1,0 +1,48 @@
+name: Publish CLI Image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v19
+
+      - name: Enable Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v7
+
+      - name: Build CLI container image
+        id: build-image
+        shell: bash
+        run: |
+          image_path="$(nix build .#cli-container --print-out-paths --no-link)"
+          echo "image_path=${image_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Load image into Docker
+        run: docker load --input "${{ steps.build-image.outputs.image_path }}"
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: suicide/rrscli:latest
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push image to Docker Hub
+        run: docker push suicide/rrscli:latest

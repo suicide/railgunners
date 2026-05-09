@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v19
+
+      - name: Enable Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v7
+
+      - name: Run flake checks
+        run: nix flake check
