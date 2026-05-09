@@ -95,7 +95,12 @@ pub(crate) fn parse_chain_scope(
     }
 }
 
-pub(crate) fn parse_required_suffix(value: &str, json: bool) -> Result<String, CliError> {
+fn parse_search_fragment(
+    value: &str,
+    label: &str,
+    json: bool,
+    extra_error_suffix: &str,
+) -> Result<String, CliError> {
     if value.is_empty() {
         return Ok(String::new());
     }
@@ -107,8 +112,25 @@ pub(crate) fn parse_required_suffix(value: &str, json: bool) -> Result<String, C
     }
 
     Err(CliError::command(
-        "invalid required suffix: suffix must use only Bech32 lowercase payload characters and must not include the 0zk1 prefix"
-            .to_owned(),
+        format!(
+            "invalid {label}: {label} must use only Bech32 lowercase payload characters{extra_error_suffix}"
+        ),
         json,
     ))
+}
+
+pub(crate) fn parse_prefix(value: &str, json: bool) -> Result<String, CliError> {
+    if value.starts_with("0zk1") {
+        return Err(CliError::command(
+            "invalid prefix: prefix must use only Bech32 lowercase payload characters and must not include the 0zk1 or 0zk1qy prefix"
+                .to_owned(),
+            json,
+        ));
+    }
+
+    parse_search_fragment(value, "prefix", json, " and must not include the 0zk1 or 0zk1qy prefix")
+}
+
+pub(crate) fn parse_suffix(value: &str, json: bool) -> Result<String, CliError> {
+    parse_search_fragment(value, "suffix", json, "")
 }

@@ -3,11 +3,11 @@ use crate::{
     error::CliError,
     output::write_json,
     parse::{
-        parse_address, parse_chain_scope, parse_master_public_key, parse_required_suffix,
+        parse_address, parse_chain_scope, parse_master_public_key, parse_prefix, parse_suffix,
         parse_viewing_public_key,
     },
     workflows::address::{DecodedAddress, decode_address, encode_address, validate_address},
-    workflows::address_search::{AddressSearchMatch, AddressSearchOptions, search_lower_address},
+    workflows::address_search::{AddressSearchMatch, AddressSearchOptions, search_address},
 };
 use railgun_core::Bip39WordCount;
 use railgun_types::ChainScope;
@@ -23,101 +23,161 @@ pub(crate) fn execute(command: AddressCommand, stdout: &mut dyn Write) -> Result
             chain_id,
             viewing_public_key,
             json,
-        } => {
-            let master_public_key = parse_master_public_key(&master_public_key, json)?;
-            let viewing_public_key = parse_viewing_public_key(&viewing_public_key, json)?;
-            let chain_scope = parse_chain_scope(chain_type, chain_id, json)?;
-            let address =
-                encode_address(version, &master_public_key, chain_scope, &viewing_public_key)
-                    .map_err(|error| CliError::command(error.to_string(), json))?;
-
-            if json {
-                write_json(stdout, &EncodedAddressJson { address: address.as_str() })?;
-            } else {
-                writeln!(stdout, "{}", address.as_str())?;
-            }
-        }
-        AddressCommand::Decode { address, json } => {
-            let decoded = decode_address(&address)
-                .map_err(|error| CliError::command(error.to_string(), json))?;
-
-            if json {
-                write_json(stdout, &DecodedAddressJson::from_decoded(&decoded))?;
-            } else {
-                write_text_decoded(stdout, &decoded)?;
-            }
-        }
-        AddressCommand::Validate { address, json } => match validate_address(&address) {
-            Ok(decoded) => {
-                if json {
-                    write_json(stdout, &ValidatedAddressJson::from_decoded(&decoded))?;
-                } else {
-                    writeln!(stdout, "valid")?;
-                }
-            }
-            Err(error) => {
-                if json {
-                    return Err(CliError::RawJson(serde_json::to_string(&ValidationErrorJson {
-                        valid: false,
-                        error: error.to_string(),
-                    })?));
-                }
-                return Err(CliError::command(error.to_string(), false));
-            }
-        },
-        AddressCommand::SearchLower {
-            target_addresses,
+        } => execute_encode(
+            stdout,
+            version,
+            &master_public_key,
+            chain_type,
+            chain_id,
+            &viewing_public_key,
+            json,
+        )?,
+        AddressCommand::Decode { address, json } => execute_decode(stdout, &address, json)?,
+        AddressCommand::Validate { address, json } => execute_validate(stdout, &address, json)?,
+        AddressCommand::Search {
+            lower_than_addresses,
             word_count,
             index,
-            required_suffix,
+            prefix,
+            suffix,
             jobs,
             progress_every,
             max_attempts,
             show_secrets,
             json,
-        } => {
-            if !show_secrets {
-                return Err(CliError::command(
-                    "address search requires --show-secrets".to_owned(),
-                    json,
-                ));
-            }
+        } => execute_search(
+            stdout,
+            &lower_than_addresses,
+            word_count,
+            index,
+            prefix.as_deref(),
+            suffix.as_deref(),
+            jobs,
+            progress_every,
+            max_attempts,
+            show_secrets,
+            json,
+        )?,
+    }
 
-            let word_count = Bip39WordCount::try_from(word_count).map_err(|error| {
-                CliError::command(format!("invalid --word-count value: {error}"), json)
-            })?;
-            let target_addresses = target_addresses
-                .iter()
-                .map(|address| parse_address(address, json))
-                .collect::<Result<Vec<_>, _>>()?;
-            let required_suffix = required_suffix
-                .as_deref()
-                .map(|suffix| parse_required_suffix(suffix, json))
-                .transpose()?;
-            let worker_count = jobs.unwrap_or_else(default_worker_count);
-            if worker_count == 0 {
-                return Err(CliError::command("--jobs must be at least 1".to_owned(), json));
-            }
+    Ok(())
+}
 
-            let result = search_lower_address(
-                AddressSearchOptions {
-                    target_addresses,
-                    word_count,
-                    index,
-                    required_suffix,
-                    worker_count,
-                    progress_every,
-                    max_attempts,
-                },
-                json,
-            )?;
+fn execute_encode(
+    stdout: &mut dyn Write,
+    version: u8,
+    master_public_key: &str,
+    chain_type: Option<u8>,
+    chain_id: Option<u64>,
+    viewing_public_key: &str,
+    json: bool,
+) -> Result<(), CliError> {
+    let master_public_key = parse_master_public_key(master_public_key, json)?;
+    let viewing_public_key = parse_viewing_public_key(viewing_public_key, json)?;
+    let chain_scope = parse_chain_scope(chain_type, chain_id, json)?;
+    let address = encode_address(version, &master_public_key, chain_scope, &viewing_public_key)
+        .map_err(|error| CliError::command(error.to_string(), json))?;
 
+    if json {
+        write_json(stdout, &EncodedAddressJson { address: address.as_str() })?;
+    } else {
+        writeln!(stdout, "{}", address.as_str())?;
+    }
+
+    Ok(())
+}
+
+fn execute_decode(stdout: &mut dyn Write, address: &str, json: bool) -> Result<(), CliError> {
+    let decoded =
+        decode_address(address).map_err(|error| CliError::command(error.to_string(), json))?;
+
+    if json {
+        write_json(stdout, &DecodedAddressJson::from_decoded(&decoded))?;
+    } else {
+        write_text_decoded(stdout, &decoded)?;
+    }
+
+    Ok(())
+}
+
+fn execute_validate(stdout: &mut dyn Write, address: &str, json: bool) -> Result<(), CliError> {
+    match validate_address(address) {
+        Ok(decoded) => {
             if json {
-                write_json(stdout, &SearchLowerJson::from_match(&result))?;
+                write_json(stdout, &ValidatedAddressJson::from_decoded(&decoded))?;
             } else {
-                write_text_search_lower(stdout, &result)?;
+                writeln!(stdout, "valid")?;
             }
+            Ok(())
         }
+        Err(error) => {
+            if json {
+                return Err(CliError::RawJson(serde_json::to_string(&ValidationErrorJson {
+                    valid: false,
+                    error: error.to_string(),
+                })?));
+            }
+            Err(CliError::command(error.to_string(), false))
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_search(
+    stdout: &mut dyn Write,
+    lower_than_addresses: &[String],
+    word_count: usize,
+    index: u32,
+    prefix: Option<&str>,
+    suffix: Option<&str>,
+    jobs: Option<usize>,
+    progress_every: u64,
+    max_attempts: Option<u64>,
+    show_secrets: bool,
+    json: bool,
+) -> Result<(), CliError> {
+    if !show_secrets {
+        return Err(CliError::command("address search requires --show-secrets".to_owned(), json));
+    }
+
+    let word_count = Bip39WordCount::try_from(word_count)
+        .map_err(|error| CliError::command(format!("invalid --word-count value: {error}"), json))?;
+    let lower_than_addresses = lower_than_addresses
+        .iter()
+        .map(|address| parse_address(address, json))
+        .collect::<Result<Vec<_>, _>>()?;
+    let prefix = prefix.map(|value| parse_prefix(value, json)).transpose()?;
+    let suffix = suffix.map(|value| parse_suffix(value, json)).transpose()?;
+    if lower_than_addresses.is_empty() && prefix.is_none() && suffix.is_none() {
+        return Err(CliError::command(
+            "at least one of --lower-than, --prefix, or --suffix is required".to_owned(),
+            json,
+        ));
+    }
+
+    let worker_count = jobs.unwrap_or_else(default_worker_count);
+    if worker_count == 0 {
+        return Err(CliError::command("--jobs must be at least 1".to_owned(), json));
+    }
+
+    let result = search_address(
+        AddressSearchOptions {
+            lower_than_addresses,
+            word_count,
+            index,
+            prefix,
+            suffix,
+            worker_count,
+            progress_every,
+            max_attempts,
+        },
+        json,
+    )?;
+
+    if json {
+        write_json(stdout, &SearchJson::from_match(&result))?;
+    } else {
+        write_text_search(stdout, &result)?;
     }
 
     Ok(())
@@ -151,18 +211,20 @@ fn format_master_public_key_hex(decoded: &DecodedAddress) -> String {
     hex::encode(padded)
 }
 
-fn write_text_search_lower(
-    stdout: &mut dyn Write,
-    result: &AddressSearchMatch,
-) -> Result<(), CliError> {
+fn write_text_search(stdout: &mut dyn Write, result: &AddressSearchMatch) -> Result<(), CliError> {
     writeln!(stdout, "Found matching address after {} attempts.", result.attempts())?;
-    writeln!(stdout, "minimumTargetAddress: {}", result.minimum_target_address().as_str())?;
+    if let Some(minimum_lower_than_address) = result.minimum_lower_than_address() {
+        writeln!(stdout, "minimumLowerThanAddress: {}", minimum_lower_than_address.as_str())?;
+    }
     writeln!(stdout, "derivedAddress: {}", result.derived_address().as_str())?;
     writeln!(stdout, "mnemonic: {}", result.mnemonic())?;
     writeln!(stdout, "index: {}", result.index())?;
     writeln!(stdout, "wordCount: {}", result.word_count())?;
-    if let Some(required_suffix) = result.required_suffix() {
-        writeln!(stdout, "requiredSuffix: {required_suffix}")?;
+    if let Some(prefix) = result.prefix() {
+        writeln!(stdout, "prefix: {prefix}")?;
+    }
+    if let Some(suffix) = result.suffix() {
+        writeln!(stdout, "suffix: {suffix}")?;
     }
     writeln!(stdout, "viewingPrivateKey: {}", result.viewing_private_key_hex())?;
     writeln!(stdout, "packedSpendingPublicKey: {}", result.packed_spending_public_key_hex())?;
@@ -258,17 +320,19 @@ struct ValidationErrorJson {
 }
 
 #[derive(Serialize)]
-struct SearchLowerJson<'a> {
-    #[serde(rename = "minimumTargetAddress")]
-    minimum_target_address: &'a str,
+struct SearchJson<'a> {
+    #[serde(rename = "minimumLowerThanAddress", skip_serializing_if = "Option::is_none")]
+    minimum_lower_than_address: Option<&'a str>,
     #[serde(rename = "derivedAddress")]
     derived_address: &'a str,
     mnemonic: &'a str,
     index: u32,
     #[serde(rename = "wordCount")]
     word_count: usize,
-    #[serde(rename = "requiredSuffix", skip_serializing_if = "Option::is_none")]
-    required_suffix: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prefix: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suffix: Option<&'a str>,
     #[serde(rename = "viewingPrivateKey")]
     viewing_private_key: &'a str,
     #[serde(rename = "packedSpendingPublicKey")]
@@ -280,15 +344,18 @@ struct SearchLowerJson<'a> {
     worker_count: usize,
 }
 
-impl<'a> SearchLowerJson<'a> {
+impl<'a> SearchJson<'a> {
     fn from_match(result: &'a AddressSearchMatch) -> Self {
         Self {
-            minimum_target_address: result.minimum_target_address().as_str(),
+            minimum_lower_than_address: result
+                .minimum_lower_than_address()
+                .map(railgun_types::RailgunAddress::as_str),
             derived_address: result.derived_address().as_str(),
             mnemonic: result.mnemonic(),
             index: result.index(),
             word_count: result.word_count(),
-            required_suffix: result.required_suffix(),
+            prefix: result.prefix(),
+            suffix: result.suffix(),
             viewing_private_key: result.viewing_private_key_hex(),
             packed_spending_public_key: result.packed_spending_public_key_hex(),
             shareable_viewing_key: result.shareable_viewing_key(),
@@ -300,7 +367,31 @@ impl<'a> SearchLowerJson<'a> {
 
 #[cfg(test)]
 mod tests {
+    use railgun_types::RailgunAddress;
+
     use crate::run;
+
+    fn sample_lower_than() -> &'static str {
+        "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca"
+    }
+
+    fn sample_prefix() -> String {
+        let address = RailgunAddress::parse(sample_lower_than())
+            .unwrap_or_else(|_| panic!("sample lower-than address should parse"));
+        address
+            .as_str()
+            .strip_prefix("0zk1qy")
+            .unwrap_or_else(|| panic!("sample lower-than address should use the all-chains stem"))
+            .chars()
+            .take(3)
+            .collect()
+    }
+
+    fn sample_suffix() -> String {
+        let address = RailgunAddress::parse(sample_lower_than())
+            .unwrap_or_else(|_| panic!("sample lower-than address should parse"));
+        address.as_str()[address.as_str().len() - 3..].to_owned()
+    }
 
     #[test]
     fn encodes_vector_one_with_defaults_as_json() {
@@ -436,17 +527,11 @@ mod tests {
     }
 
     #[test]
-    fn search_lower_requires_show_secrets() {
+    fn search_requires_show_secrets() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let exit_code = run(
-            [
-                "railguncli",
-                "address",
-                "search-lower",
-                "--target-address",
-                "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca",
-            ],
+            ["railguncli", "address", "search", "--lower-than", sample_lower_than()],
             &mut stdout,
             &mut stderr,
         );
@@ -457,20 +542,54 @@ mod tests {
     }
 
     #[test]
-    fn search_lower_rejects_invalid_required_suffix() {
+    fn search_requires_at_least_one_filter() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code =
+            run(["railguncli", "address", "search", "--show-secrets"], &mut stdout, &mut stderr);
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            "at least one of --lower-than, --prefix, or --suffix is required\n"
+        );
+    }
+
+    #[test]
+    fn search_supports_prefix_only_without_lower_than() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let exit_code = run(
             [
                 "railguncli",
                 "address",
-                "search-lower",
-                "--target-address",
-                "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca",
-                "--required-suffix",
-                "0zk1bad",
+                "search",
+                "--prefix",
+                &sample_prefix(),
                 "--show-secrets",
+                "--max-attempts",
+                "0",
+                "--json",
             ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert_eq!(
+            String::from_utf8_lossy(&stdout),
+            "{\"error\":\"no matching address found in 0 attempts\"}\n"
+        );
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn search_rejects_invalid_prefix() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            ["railguncli", "address", "search", "--prefix", "0zk1bad", "--show-secrets"],
             &mut stdout,
             &mut stderr,
         );
@@ -479,21 +598,67 @@ mod tests {
         assert!(stdout.is_empty());
         assert_eq!(
             String::from_utf8_lossy(&stderr),
-            "invalid required suffix: suffix must use only Bech32 lowercase payload characters and must not include the 0zk1 prefix\n"
+            "invalid prefix: prefix must use only Bech32 lowercase payload characters and must not include the 0zk1 or 0zk1qy prefix\n"
         );
     }
 
     #[test]
-    fn search_lower_reports_capped_failure_as_json() {
+    fn search_supports_suffix_only_without_lower_than() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let exit_code = run(
             [
                 "railguncli",
                 "address",
-                "search-lower",
-                "--target-address",
-                "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca",
+                "search",
+                "--suffix",
+                &sample_suffix(),
+                "--show-secrets",
+                "--max-attempts",
+                "0",
+                "--json",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert_eq!(
+            String::from_utf8_lossy(&stdout),
+            "{\"error\":\"no matching address found in 0 attempts\"}\n"
+        );
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn search_rejects_invalid_suffix() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            ["railguncli", "address", "search", "--suffix", "0zk1bad", "--show-secrets"],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            "invalid suffix: suffix must use only Bech32 lowercase payload characters\n"
+        );
+    }
+
+    #[test]
+    fn search_reports_capped_failure_as_json() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railguncli",
+                "address",
+                "search",
+                "--lower-than",
+                sample_lower_than(),
                 "--max-attempts",
                 "0",
                 "--show-secrets",
