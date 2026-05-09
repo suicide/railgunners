@@ -89,8 +89,10 @@
             tag = "latest";
             contents = [
               cliPackage
+              pkgs.bash
               pkgs.cacert
               pkgs.curl
+              pkgs.jq
             ];
             config = {
               Cmd = [ "${cliPackage}/bin/railguncli" ];
