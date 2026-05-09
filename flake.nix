@@ -91,6 +91,7 @@
               cliPackage
               pkgs.bash
               pkgs.cacert
+              pkgs.coreutils
               pkgs.curl
               pkgs.jq
             ];
