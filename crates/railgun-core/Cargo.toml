@@ -21,7 +21,7 @@ blake-hash = "0.4.1"
 bip39 = { version = "2.2.2", features = ["rand"] }
 chacha20poly1305 = "0.10.1"
 curve25519-dalek = "5.0.0-pre.6"
-ed25519-dalek = "3.0.0-pre.6"
+ed25519-dalek = "3.0.0-pre.7"
 hmac = "0.12.1"
 num-bigint.workspace = true
 num-traits = "0.2.19"
