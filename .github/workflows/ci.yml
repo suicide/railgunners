@@ -19,7 +19,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v19
 
       - name: Enable Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@v7
+        uses: DeterminateSystems/magic-nix-cache-action@v13
 
       - name: Run flake checks
         run: nix flake check

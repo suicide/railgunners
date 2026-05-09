@@ -18,7 +18,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v19
 
       - name: Enable Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@v7
+        uses: DeterminateSystems/magic-nix-cache-action@v13
 
       - name: Build CLI container image
         id: build-image
