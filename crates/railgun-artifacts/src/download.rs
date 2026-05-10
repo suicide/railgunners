@@ -412,25 +412,21 @@ fn download_compressed_file(
 }
 
 fn fetch_url_bytes(url: &str) -> Result<Vec<u8>, ArtifactError> {
-    let response = ureq::get(url).call().map_err(|error| map_download_error(url, &error))?;
-    let mut reader = response.into_reader();
+    let mut response = ureq::get(url).call().map_err(|error| map_download_error(url, &error))?;
     let mut bytes = Vec::new();
-    reader.read_to_end(&mut bytes).map_err(|_| ArtifactError::ArtifactDownloadFailed {
-        url: url.to_owned(),
-        status_code: None,
+    response.body_mut().as_reader().read_to_end(&mut bytes).map_err(|_| {
+        ArtifactError::ArtifactDownloadFailed { url: url.to_owned(), status_code: None }
     })?;
     Ok(bytes)
 }
 
 fn map_download_error(url: &str, error: &ureq::Error) -> ArtifactError {
     match error {
-        ureq::Error::Status(status_code, _) => ArtifactError::ArtifactDownloadFailed {
+        ureq::Error::StatusCode(status_code) => ArtifactError::ArtifactDownloadFailed {
             url: url.to_owned(),
             status_code: Some(*status_code),
         },
-        ureq::Error::Transport(_) => {
-            ArtifactError::ArtifactDownloadFailed { url: url.to_owned(), status_code: None }
-        }
+        _ => ArtifactError::ArtifactDownloadFailed { url: url.to_owned(), status_code: None },
     }
 }
 

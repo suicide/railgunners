@@ -189,9 +189,15 @@ pub fn encode_v2_bound_params(bound_params: &V2BoundParams) -> Vec<u8> {
 /// Returns an error if the payload does not match the canonical V2 tuple shape or any decoded
 /// field fails domain validation.
 pub fn decode_v2_bound_params(bytes: &[u8]) -> Result<V2BoundParams, V2BoundParamsError> {
-    let decoded = V2BoundParamsAbi::abi_decode(bytes, true)
+    let decoded = V2BoundParamsAbi::abi_decode_validate(bytes)
         .map_err(|_| V2BoundParamsError::AbiDecodeFailed)?;
-    from_abi(&decoded)
+    let bound_params = from_abi(&decoded)?;
+
+    if encode_v2_bound_params(&bound_params) == bytes {
+        Ok(bound_params)
+    } else {
+        Err(V2BoundParamsError::AbiDecodeFailed)
+    }
 }
 
 /// Derives the canonical V2 bound params hash as `keccak256(abi.encode(boundParams)) mod SNARK_PRIME`.

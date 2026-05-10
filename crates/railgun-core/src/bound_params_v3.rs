@@ -164,9 +164,15 @@ pub fn encode_v3_bound_params(bound_params: &V3BoundParams) -> Vec<u8> {
 /// Returns an error if the payload does not match the canonical V3 tuple shape or any decoded
 /// field fails domain validation.
 pub fn decode_v3_bound_params(bytes: &[u8]) -> Result<V3BoundParams, V3BoundParamsError> {
-    let decoded = V3BoundParamsAbi::abi_decode(bytes, true)
+    let decoded = V3BoundParamsAbi::abi_decode_validate(bytes)
         .map_err(|_| V3BoundParamsError::AbiDecodeFailed)?;
-    from_abi(&decoded)
+    let bound_params = from_abi(&decoded)?;
+
+    if encode_v3_bound_params(&bound_params) == bytes {
+        Ok(bound_params)
+    } else {
+        Err(V3BoundParamsError::AbiDecodeFailed)
+    }
 }
 
 /// Derives the canonical V3 bound params hash as `keccak256(abi.encode(boundParams)) mod SNARK_PRIME`.
