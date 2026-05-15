@@ -1917,6 +1917,7 @@ name = "railgun-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "getrandom 0.3.4",
  "hex",
  "num-bigint",
  "railgun-artifacts",

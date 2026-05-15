@@ -73,6 +73,7 @@ railguncli address encode --master-public-key "000000000000000000000000000000000
 railguncli address decode --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
 railguncli address validate --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
 railguncli address search --lower-than "0zk1qy0000k0k4w2akdev8ju4z7yp4w4x0zz9ehxdqe9chsjuujeklwdtrv7j6fe3z53lug74ey6tjlpk2xlfdp2pnfnc4972qwpk9fvhafqtrv9ctnxgjhush3njwh" --lower-than "0zk1qyduss9nnfyycfwt03fwds69c7z27rmmulcxsq3lvn0yhwjxfa7lnrv7j6fe3z53la7dxtysu5dtqp9lh6k6qeft3j5cvawwdq7zx6t9ltsncagyz06wk4n66nt" --leading-zeroes 4 --prefix 0000dus --suffix nt --jobs 8 --progress-every 1000 --show-secrets --json
+railguncli address search --seed-mode raw --leading-zeroes 4 --jobs 8 --progress-every 1000 --show-secrets --json
 ```
 
 Notes:
@@ -85,8 +86,9 @@ Notes:
 - `address search` searches only all-chains `0zk` addresses and can optionally compare against the minimum repeatable `--lower-than`
 - `address search` requires `--show-secrets` because success output includes the mnemonic and view-only secrets
 - `address search` requires at least one of `--lower-than`, `--leading-zeroes`, `--prefix`, or `--suffix`
-- `address search` supports `--jobs`, `--progress-every`, `--max-attempts`, and combinable `--lower-than`, `--leading-zeroes`, `--prefix`, and `--suffix` filters
+- `address search` supports `--seed-mode bip39|raw`, `--jobs`, `--progress-every`, `--max-attempts`, and combinable `--lower-than`, `--leading-zeroes`, `--prefix`, and `--suffix` filters
 - `--leading-zeroes` counts literal `0` characters immediately after the all-chains `0zk1qy` stem and stops on the first match meeting the threshold
+- `--seed-mode raw` searches direct 64-byte seeds instead of BIP-39 mnemonics, omits `mnemonic` and `wordCount` from success output, and returns `rawSeed` instead
 
 Current mnemonic commands:
 

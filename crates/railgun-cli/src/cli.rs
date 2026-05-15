@@ -1,4 +1,10 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum SearchSeedModeArg {
+    Bip39,
+    Raw,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "railguncli")]
@@ -79,6 +85,9 @@ pub(crate) enum AddressCommand {
         /// Optional minimum number of literal `0` characters immediately after the all-chains `0zk1qy` stem.
         #[arg(long = "leading-zeroes")]
         leading_zeroes: Option<usize>,
+        /// Seed source used for search attempts. `raw` skips BIP-39 and searches direct 64-byte seeds.
+        #[arg(long = "seed-mode", value_enum, default_value_t = SearchSeedModeArg::Bip39)]
+        seed_mode: SearchSeedModeArg,
         /// Number of BIP-39 words to generate.
         #[arg(long = "word-count", default_value_t = 12)]
         word_count: usize,

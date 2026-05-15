@@ -1,5 +1,5 @@
 use crate::{
-    cli::AddressCommand,
+    cli::{AddressCommand, SearchSeedModeArg},
     error::CliError,
     output::write_json,
     parse::{
@@ -7,7 +7,9 @@ use crate::{
         parse_viewing_public_key,
     },
     workflows::address::{DecodedAddress, decode_address, encode_address, validate_address},
-    workflows::address_search::{AddressSearchMatch, AddressSearchOptions, search_address},
+    workflows::address_search::{
+        AddressSearchMatch, AddressSearchOptions, SearchSeedMode, search_address,
+    },
 };
 use railgun_core::Bip39WordCount;
 use railgun_types::ChainScope;
@@ -37,6 +39,7 @@ pub(crate) fn execute(command: AddressCommand, stdout: &mut dyn Write) -> Result
         AddressCommand::Search {
             lower_than_addresses,
             leading_zeroes,
+            seed_mode,
             word_count,
             index,
             prefix,
@@ -50,6 +53,7 @@ pub(crate) fn execute(command: AddressCommand, stdout: &mut dyn Write) -> Result
             stdout,
             &lower_than_addresses,
             leading_zeroes,
+            seed_mode,
             word_count,
             index,
             prefix.as_deref(),
@@ -129,6 +133,7 @@ fn execute_search(
     stdout: &mut dyn Write,
     lower_than_addresses: &[String],
     leading_zeroes: Option<usize>,
+    seed_mode: SearchSeedModeArg,
     word_count: usize,
     index: u32,
     prefix: Option<&str>,
@@ -172,6 +177,10 @@ fn execute_search(
         AddressSearchOptions {
             lower_than_addresses,
             leading_zeroes,
+            seed_mode: match seed_mode {
+                SearchSeedModeArg::Bip39 => SearchSeedMode::Bip39,
+                SearchSeedModeArg::Raw => SearchSeedMode::Raw,
+            },
             word_count,
             index,
             prefix,
@@ -226,9 +235,17 @@ fn write_text_search(stdout: &mut dyn Write, result: &AddressSearchMatch) -> Res
         writeln!(stdout, "minimumLowerThanAddress: {}", minimum_lower_than_address.as_str())?;
     }
     writeln!(stdout, "derivedAddress: {}", result.derived_address().as_str())?;
-    writeln!(stdout, "mnemonic: {}", result.mnemonic())?;
+    writeln!(stdout, "seedMode: {}", result.seed_mode().as_str())?;
+    if let Some(mnemonic) = result.mnemonic() {
+        writeln!(stdout, "mnemonic: {mnemonic}")?;
+    }
+    if let Some(raw_seed_hex) = result.raw_seed_hex() {
+        writeln!(stdout, "rawSeed: {raw_seed_hex}")?;
+    }
     writeln!(stdout, "index: {}", result.index())?;
-    writeln!(stdout, "wordCount: {}", result.word_count())?;
+    if let Some(word_count) = result.word_count() {
+        writeln!(stdout, "wordCount: {word_count}")?;
+    }
     if let Some(prefix) = result.prefix() {
         writeln!(stdout, "prefix: {prefix}")?;
     }
@@ -337,10 +354,15 @@ struct SearchJson<'a> {
     minimum_lower_than_address: Option<&'a str>,
     #[serde(rename = "derivedAddress")]
     derived_address: &'a str,
-    mnemonic: &'a str,
+    #[serde(rename = "seedMode")]
+    seed_mode: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mnemonic: Option<&'a str>,
+    #[serde(rename = "rawSeed", skip_serializing_if = "Option::is_none")]
+    raw_seed_hex: Option<&'a str>,
     index: u32,
-    #[serde(rename = "wordCount")]
-    word_count: usize,
+    #[serde(rename = "wordCount", skip_serializing_if = "Option::is_none")]
+    word_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     prefix: Option<&'a str>,
     #[serde(rename = "leadingZeroes", skip_serializing_if = "Option::is_none")]
@@ -365,7 +387,9 @@ impl<'a> SearchJson<'a> {
                 .minimum_lower_than_address()
                 .map(railgun_types::RailgunAddress::as_str),
             derived_address: result.derived_address().as_str(),
+            seed_mode: result.seed_mode().as_str(),
             mnemonic: result.mnemonic(),
+            raw_seed_hex: result.raw_seed_hex(),
             index: result.index(),
             word_count: result.word_count(),
             prefix: result.prefix(),
@@ -417,6 +441,36 @@ mod tests {
                 "railguncli",
                 "address",
                 "search",
+                "--leading-zeroes",
+                "0",
+                "--show-secrets",
+                "--max-attempts",
+                "0",
+                "--json",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert_eq!(
+            String::from_utf8_lossy(&stdout),
+            "{\"error\":\"no matching address found in 0 attempts\"}\n"
+        );
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn search_accepts_raw_seed_mode_as_filter() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railguncli",
+                "address",
+                "search",
+                "--seed-mode",
+                "raw",
                 "--leading-zeroes",
                 "0",
                 "--show-secrets",

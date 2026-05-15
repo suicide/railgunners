@@ -14,16 +14,33 @@ use std::{
 };
 
 use crate::workflows::{
-    keys::{derive_wallet_keys, pack_derived_spending_public_key},
+    keys::{derive_wallet_keys, derive_wallet_keys_from_seed, pack_derived_spending_public_key},
     mnemonic::generate_mnemonic,
 };
 
 const ALL_CHAINS_ADDRESS_STEM: &str = "0zk1qy";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SearchSeedMode {
+    Bip39,
+    Raw,
+}
+
+impl SearchSeedMode {
+    #[must_use]
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bip39 => "bip39",
+            Self::Raw => "raw",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct AddressSearchOptions {
     pub(crate) lower_than_addresses: Vec<RailgunAddress>,
     pub(crate) leading_zeroes: Option<usize>,
+    pub(crate) seed_mode: SearchSeedMode,
     pub(crate) word_count: Bip39WordCount,
     pub(crate) index: u32,
     pub(crate) prefix: Option<String>,
@@ -37,9 +54,11 @@ pub(crate) struct AddressSearchOptions {
 pub(crate) struct AddressSearchMatch {
     minimum_lower_than_address: Option<RailgunAddress>,
     derived_address: RailgunAddress,
-    mnemonic: String,
+    seed_mode: SearchSeedMode,
+    mnemonic: Option<String>,
+    raw_seed_hex: Option<String>,
     index: u32,
-    word_count: usize,
+    word_count: Option<usize>,
     prefix: Option<String>,
     leading_zeroes: Option<usize>,
     suffix: Option<String>,
@@ -55,9 +74,11 @@ impl AddressSearchMatch {
     fn new(
         minimum_lower_than_address: Option<RailgunAddress>,
         derived_address: RailgunAddress,
-        mnemonic: String,
+        seed_mode: SearchSeedMode,
+        mnemonic: Option<String>,
+        raw_seed_hex: Option<String>,
         index: u32,
-        word_count: usize,
+        word_count: Option<usize>,
         prefix: Option<String>,
         leading_zeroes: Option<usize>,
         suffix: Option<String>,
@@ -70,7 +91,9 @@ impl AddressSearchMatch {
         Self {
             minimum_lower_than_address,
             derived_address,
+            seed_mode,
             mnemonic,
+            raw_seed_hex,
             index,
             word_count,
             prefix,
@@ -95,8 +118,18 @@ impl AddressSearchMatch {
     }
 
     #[must_use]
-    pub(crate) fn mnemonic(&self) -> &str {
-        &self.mnemonic
+    pub(crate) const fn seed_mode(&self) -> SearchSeedMode {
+        self.seed_mode
+    }
+
+    #[must_use]
+    pub(crate) fn mnemonic(&self) -> Option<&str> {
+        self.mnemonic.as_deref()
+    }
+
+    #[must_use]
+    pub(crate) fn raw_seed_hex(&self) -> Option<&str> {
+        self.raw_seed_hex.as_deref()
     }
 
     #[must_use]
@@ -105,7 +138,7 @@ impl AddressSearchMatch {
     }
 
     #[must_use]
-    pub(crate) const fn word_count(&self) -> usize {
+    pub(crate) const fn word_count(&self) -> Option<usize> {
         self.word_count
     }
 
@@ -187,8 +220,23 @@ pub(crate) fn search_address(
     options: AddressSearchOptions,
     json: bool,
 ) -> Result<AddressSearchMatch, crate::error::CliError> {
-    search_address_with_generator(options, json, generate_mnemonic)
-        .map_err(|error| crate::error::CliError::command(error.to_string(), json))
+    match options.seed_mode {
+        SearchSeedMode::Bip39 => search_address_with_generator(options, json, generate_mnemonic),
+        SearchSeedMode::Raw => search_address_with_seed_generator(options, json, generate_seed),
+    }
+    .map_err(|error| crate::error::CliError::command(error.to_string(), json))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SearchSecretMaterial {
+    Bip39 { mnemonic: Bip39Mnemonic, phrase: String, word_count: usize },
+    RawSeed { seed_hex: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct GeneratedSearchCandidate {
+    derived: crate::workflows::keys::DerivedWalletKeys,
+    secret_material: SearchSecretMaterial,
 }
 
 fn search_address_with_generator<F>(
@@ -198,6 +246,53 @@ fn search_address_with_generator<F>(
 ) -> Result<AddressSearchMatch, AddressSearchError>
 where
     F: Fn(Bip39WordCount) -> Result<Bip39Mnemonic, Bip39Error> + Send + Sync + 'static,
+{
+    search_address_with_candidate_generator(options, json, move |options| {
+        let mnemonic = generator(options.word_count).map_err(AddressSearchError::Bip39)?;
+        let phrase = mnemonic.phrase();
+        let derived = derive_wallet_keys(&mnemonic, options.index)
+            .map_err(|error| AddressSearchError::KeyDerivation(error.to_string()))?;
+        Ok(GeneratedSearchCandidate {
+            derived,
+            secret_material: SearchSecretMaterial::Bip39 {
+                mnemonic,
+                phrase,
+                word_count: options.word_count.as_usize(),
+            },
+        })
+    })
+}
+
+fn search_address_with_seed_generator<F>(
+    options: AddressSearchOptions,
+    json: bool,
+    generator: F,
+) -> Result<AddressSearchMatch, AddressSearchError>
+where
+    F: Fn() -> Result<[u8; 64], String> + Send + Sync + 'static,
+{
+    search_address_with_candidate_generator(options, json, move |options| {
+        let seed = generator().map_err(AddressSearchError::KeyDerivation)?;
+        let seed_hex = hex::encode(seed);
+        let derived = derive_wallet_keys_from_seed(&seed, options.index)
+            .map_err(|error| AddressSearchError::KeyDerivation(error.to_string()))?;
+        Ok(GeneratedSearchCandidate {
+            derived,
+            secret_material: SearchSecretMaterial::RawSeed { seed_hex },
+        })
+    })
+}
+
+fn search_address_with_candidate_generator<F>(
+    options: AddressSearchOptions,
+    json: bool,
+    generator: F,
+) -> Result<AddressSearchMatch, AddressSearchError>
+where
+    F: Fn(&AddressSearchOptions) -> Result<GeneratedSearchCandidate, AddressSearchError>
+        + Send
+        + Sync
+        + 'static,
 {
     let minimum_lower_than = options
         .lower_than_addresses
@@ -278,7 +373,7 @@ fn worker_loop<F>(
     attempts: &AtomicU64,
     sender: &mpsc::Sender<WorkerMessage>,
 ) where
-    F: Fn(Bip39WordCount) -> Result<Bip39Mnemonic, Bip39Error>,
+    F: Fn(&AddressSearchOptions) -> Result<GeneratedSearchCandidate, AddressSearchError>,
 {
     while !stop.load(Ordering::Relaxed) {
         let attempt = attempts.fetch_add(1, Ordering::Relaxed) + 1;
@@ -288,26 +383,14 @@ fn worker_loop<F>(
             return;
         }
 
-        let mnemonic = match generator(options.word_count) {
-            Ok(mnemonic) => mnemonic,
+        let candidate = match generator(options) {
+            Ok(candidate) => candidate,
             Err(error) => {
-                send_worker_failure(sender, stop, AddressSearchError::Bip39(error));
+                send_worker_failure(sender, stop, error);
                 return;
             }
         };
-
-        let derived = match derive_wallet_keys(&mnemonic, options.index) {
-            Ok(derived) => derived,
-            Err(error) => {
-                send_worker_failure(
-                    sender,
-                    stop,
-                    AddressSearchError::KeyDerivation(error.to_string()),
-                );
-                return;
-            }
-        };
-        let fast_stem_match = match matches_fast_stem_filters(&derived, options) {
+        let fast_stem_match = match matches_fast_stem_filters(&candidate.derived, options) {
             Ok(matches) => matches,
             Err(error) => {
                 send_worker_failure(sender, stop, error);
@@ -318,9 +401,9 @@ fn worker_loop<F>(
             if should_report_progress {
                 let candidate_address = match encode_railgun_address(
                     1,
-                    derived.master_public_key(),
+                    candidate.derived.master_public_key(),
                     ChainScope::AllChains,
-                    derived.viewing_public_key(),
+                    candidate.derived.viewing_public_key(),
                 ) {
                     Ok(address) => address,
                     Err(error) => {
@@ -345,9 +428,9 @@ fn worker_loop<F>(
         }
         let candidate_address = match encode_railgun_address(
             1,
-            derived.master_public_key(),
+            candidate.derived.master_public_key(),
             ChainScope::AllChains,
-            derived.viewing_public_key(),
+            candidate.derived.viewing_public_key(),
         ) {
             Ok(address) => address,
             Err(error) => {
@@ -364,7 +447,7 @@ fn worker_loop<F>(
 
         if matches_search_filters(&candidate_address, minimum_lower_than, options) {
             let packed_spending_public_key =
-                match pack_derived_spending_public_key(derived.spending_public_key()) {
+                match pack_derived_spending_public_key(candidate.derived.spending_public_key()) {
                     Ok(key) => key,
                     Err(error) => {
                         send_worker_failure(
@@ -378,8 +461,8 @@ fn worker_loop<F>(
             let result = match build_search_match(
                 minimum_lower_than,
                 candidate_address,
-                mnemonic.phrase(),
-                &derived,
+                &candidate.secret_material,
+                &candidate.derived,
                 packed_spending_public_key,
                 options,
                 attempt,
@@ -496,7 +579,7 @@ fn count_leading_zeroes(value: &str) -> usize {
 fn build_search_match(
     minimum_lower_than: Option<&RailgunAddress>,
     candidate_address: RailgunAddress,
-    phrase: String,
+    secret_material: &SearchSecretMaterial,
     derived: &crate::workflows::keys::DerivedWalletKeys,
     packed_spending_public_key: railgun_types::PackedSpendingPublicKey,
     options: &AddressSearchOptions,
@@ -509,12 +592,23 @@ fn build_search_match(
     ))
     .map_err(|error| AddressSearchError::ViewingKeyEncoding(error.to_string()))?;
 
+    let (seed_mode, mnemonic, raw_seed_hex, word_count) = match secret_material {
+        SearchSecretMaterial::Bip39 { phrase, word_count, .. } => {
+            (SearchSeedMode::Bip39, Some(phrase.clone()), None, Some(*word_count))
+        }
+        SearchSecretMaterial::RawSeed { seed_hex } => {
+            (SearchSeedMode::Raw, None, Some(seed_hex.clone()), None)
+        }
+    };
+
     Ok(AddressSearchMatch::new(
         minimum_lower_than.cloned(),
         candidate_address,
-        phrase,
+        seed_mode,
+        mnemonic,
+        raw_seed_hex,
         options.index,
-        options.word_count.as_usize(),
+        word_count,
         options.prefix.clone(),
         options.leading_zeroes,
         options.suffix.clone(),
@@ -526,15 +620,26 @@ fn build_search_match(
     ))
 }
 
+fn generate_seed() -> Result<[u8; 64], String> {
+    let mut seed = [0_u8; 64];
+    getrandom::fill(&mut seed).map_err(|error| format!("failed to generate raw seed: {error}"))?;
+    Ok(seed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ALL_CHAINS_ADDRESS_STEM, AddressSearchError, AddressSearchMatch, AddressSearchOptions,
-        count_leading_zeroes, matches_fast_stem_filters, matches_stem_filters,
-        search_address_with_generator,
+        SearchSeedMode, count_leading_zeroes, matches_fast_stem_filters, matches_stem_filters,
+        search_address_with_generator, search_address_with_seed_generator,
     };
-    use crate::workflows::keys::derive_wallet_keys;
-    use railgun_core::{Bip39Mnemonic, Bip39WordCount, encode_railgun_address};
+    use crate::workflows::keys::{derive_wallet_keys, derive_wallet_keys_from_seed};
+    use railgun_core::{
+        Bip39Mnemonic, Bip39WordCount, derive_master_public_key, derive_nullifying_key,
+        derive_spending_node, derive_spending_public_key, derive_viewing_node,
+        derive_viewing_public_key, encode_railgun_address, spending_private_key_from_node,
+        viewing_private_key_from_node,
+    };
     use railgun_types::ChainScope;
     use railgun_types::RailgunAddress;
     use std::{
@@ -574,6 +679,7 @@ mod tests {
             AddressSearchOptions {
                 lower_than_addresses,
                 leading_zeroes,
+                seed_mode: SearchSeedMode::Bip39,
                 word_count: Bip39WordCount::Words12,
                 index: 0,
                 prefix,
@@ -594,6 +700,39 @@ mod tests {
         ) {
             Ok(result) => result,
             Err(error) => panic!("deterministic phrase should match: {error}"),
+        }
+    }
+
+    fn deterministic_raw_seed_search_result(
+        lower_than_addresses: Vec<RailgunAddress>,
+        leading_zeroes: Option<usize>,
+        prefix: Option<String>,
+        suffix: Option<String>,
+    ) -> AddressSearchMatch {
+        let mnemonic = Bip39Mnemonic::parse(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        )
+        .unwrap_or_else(|_| panic!("test mnemonic should parse"));
+        let seed = mnemonic.seed(None);
+
+        match search_address_with_seed_generator(
+            AddressSearchOptions {
+                lower_than_addresses,
+                leading_zeroes,
+                seed_mode: SearchSeedMode::Raw,
+                word_count: Bip39WordCount::Words12,
+                index: 0,
+                prefix,
+                suffix,
+                worker_count: 1,
+                progress_every: 0,
+                max_attempts: Some(1),
+            },
+            true,
+            move || Ok(seed),
+        ) {
+            Ok(result) => result,
+            Err(error) => panic!("deterministic raw seed should match: {error}"),
         }
     }
 
@@ -635,6 +774,7 @@ mod tests {
                     "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca",
                 )],
                 leading_zeroes: None,
+                seed_mode: SearchSeedMode::Bip39,
                 word_count: Bip39WordCount::Words12,
                 index: 0,
                 prefix: None,
@@ -671,14 +811,17 @@ mod tests {
         let result = deterministic_search_result(vec![target_address.clone()], None, None, None);
 
         assert_eq!(result.index(), 0);
-        assert_eq!(result.word_count(), 12);
+        assert_eq!(result.seed_mode(), SearchSeedMode::Bip39);
+        assert_eq!(result.word_count(), Some(12));
         assert_eq!(result.attempts(), 1);
         assert_eq!(result.worker_count(), 1);
         assert_eq!(result.minimum_lower_than_address(), Some(&target_address));
         assert_eq!(result.derived_address(), &derived_address);
         assert_eq!(
             result.mnemonic(),
-            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+            Some(
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+            )
         );
         assert!(result.derived_address().as_str().starts_with("0zk1"));
     }
@@ -784,6 +927,16 @@ mod tests {
         assert_eq!(result.prefix(), Some(prefix.as_str()));
     }
 
+    #[test]
+    fn supports_raw_seed_search_without_mnemonic_output() {
+        let result = deterministic_raw_seed_search_result(Vec::new(), Some(0), None, None);
+
+        assert_eq!(result.seed_mode(), SearchSeedMode::Raw);
+        assert_eq!(result.word_count(), None);
+        assert_eq!(result.mnemonic(), None);
+        assert!(result.raw_seed_hex().is_some());
+    }
+
     fn full_address_matches_stem_filters(
         derived: &crate::workflows::keys::DerivedWalletKeys,
         options: &AddressSearchOptions,
@@ -820,6 +973,7 @@ mod tests {
         let options = AddressSearchOptions {
             lower_than_addresses: Vec::new(),
             leading_zeroes: Some(4),
+            seed_mode: SearchSeedMode::Bip39,
             word_count: Bip39WordCount::Words12,
             index: 0,
             prefix: Some("0000".to_owned()),
@@ -870,6 +1024,7 @@ mod tests {
         let options = AddressSearchOptions {
             lower_than_addresses: Vec::new(),
             leading_zeroes: Some(4),
+            seed_mode: SearchSeedMode::Bip39,
             word_count: Bip39WordCount::Words12,
             index: 0,
             prefix: Some("0000".to_owned()),
@@ -911,6 +1066,182 @@ mod tests {
             f64::from(ITERATIONS) / full_elapsed.as_secs_f64(),
             full_elapsed.as_secs_f64() / fast_elapsed.as_secs_f64(),
             ITERATIONS,
+        );
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_end_to_end_raw_seed_attempts() {
+        const ITERATIONS: u32 = 2_048;
+
+        let seeds = (0..ITERATIONS)
+            .map(|index| {
+                let mut seed = [0_u8; 64];
+                seed[..4].copy_from_slice(&index.to_be_bytes());
+                seed
+            })
+            .collect::<Vec<_>>();
+        let options = AddressSearchOptions {
+            lower_than_addresses: Vec::new(),
+            leading_zeroes: Some(4),
+            seed_mode: SearchSeedMode::Raw,
+            word_count: Bip39WordCount::Words12,
+            index: 0,
+            prefix: Some("0000".to_owned()),
+            suffix: None,
+            worker_count: 1,
+            progress_every: 0,
+            max_attempts: None,
+        };
+
+        let start = Instant::now();
+        let match_count = seeds
+            .iter()
+            .filter(|seed| {
+                let derived = derive_wallet_keys_from_seed(&seed[..], 0)
+                    .unwrap_or_else(|_| panic!("raw seed derivation should succeed"));
+                black_box(
+                    matches_fast_stem_filters(&derived, &options)
+                        .unwrap_or_else(|_| panic!("fast stem filtering should succeed")),
+                )
+            })
+            .count();
+        let elapsed = start.elapsed();
+
+        eprintln!(
+            "raw seed end-to-end: {:?} ({:.0} attempts/s) over {} attempts, matches: {}",
+            elapsed,
+            f64::from(ITERATIONS) / elapsed.as_secs_f64(),
+            ITERATIONS,
+            match_count,
+        );
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_derivation_stage_breakdown() {
+        const ITERATIONS: u32 = 2_048;
+
+        let mnemonic = Bip39Mnemonic::parse(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        )
+        .unwrap_or_else(|_| panic!("test mnemonic should parse"));
+
+        let seed_start = Instant::now();
+        for _ in 0..ITERATIONS {
+            black_box(mnemonic.seed(None));
+        }
+        let seed_elapsed = seed_start.elapsed();
+
+        let seed = mnemonic.seed(None);
+
+        let spending_node_start = Instant::now();
+        let spending_nodes = (0..ITERATIONS)
+            .map(|index| {
+                black_box(
+                    derive_spending_node(&seed, index)
+                        .unwrap_or_else(|_| panic!("spending node derivation should succeed")),
+                )
+            })
+            .collect::<Vec<_>>();
+        let spending_node_elapsed = spending_node_start.elapsed();
+
+        let viewing_node_start = Instant::now();
+        let viewing_nodes = (0..ITERATIONS)
+            .map(|index| {
+                black_box(
+                    derive_viewing_node(&seed, index)
+                        .unwrap_or_else(|_| panic!("viewing node derivation should succeed")),
+                )
+            })
+            .collect::<Vec<_>>();
+        let viewing_node_elapsed = viewing_node_start.elapsed();
+
+        let spending_public_start = Instant::now();
+        let spending_public_keys =
+            spending_nodes
+                .iter()
+                .map(|node| {
+                    let private_key = spending_private_key_from_node(node);
+                    black_box(derive_spending_public_key(&private_key).unwrap_or_else(|_| {
+                        panic!("spending public key derivation should succeed")
+                    }))
+                })
+                .collect::<Vec<_>>();
+        let spending_public_elapsed = spending_public_start.elapsed();
+
+        let viewing_public_start = Instant::now();
+        let viewing_private_keys =
+            viewing_nodes.iter().map(viewing_private_key_from_node).collect::<Vec<_>>();
+        let viewing_public_keys = viewing_private_keys
+            .iter()
+            .map(|private_key| black_box(derive_viewing_public_key(private_key)))
+            .collect::<Vec<_>>();
+        let viewing_public_elapsed = viewing_public_start.elapsed();
+
+        let nullifying_start = Instant::now();
+        let nullifying_keys = viewing_private_keys
+            .iter()
+            .map(|private_key| {
+                black_box(
+                    derive_nullifying_key(private_key)
+                        .unwrap_or_else(|_| panic!("nullifying key derivation should succeed")),
+                )
+            })
+            .collect::<Vec<_>>();
+        let nullifying_elapsed = nullifying_start.elapsed();
+
+        let master_public_start = Instant::now();
+        let master_public_keys = spending_public_keys
+            .iter()
+            .zip(&nullifying_keys)
+            .map(|(spending_public_key, nullifying_key)| {
+                black_box(
+                    derive_master_public_key(spending_public_key, nullifying_key)
+                        .unwrap_or_else(|_| panic!("master public key derivation should succeed")),
+                )
+            })
+            .collect::<Vec<_>>();
+        let master_public_elapsed = master_public_start.elapsed();
+
+        black_box(viewing_public_keys);
+        black_box(master_public_keys);
+
+        let total_elapsed = seed_elapsed
+            + spending_node_elapsed
+            + viewing_node_elapsed
+            + spending_public_elapsed
+            + viewing_public_elapsed
+            + nullifying_elapsed
+            + master_public_elapsed;
+
+        eprintln!(
+            concat!(
+                "seed: {:?} ({:.0} ops/s), ",
+                "spending node: {:?} ({:.0} ops/s), ",
+                "viewing node: {:?} ({:.0} ops/s), ",
+                "spending public: {:?} ({:.0} ops/s), ",
+                "viewing public: {:?} ({:.0} ops/s), ",
+                "nullifying: {:?} ({:.0} ops/s), ",
+                "master public: {:?} ({:.0} ops/s), ",
+                "summed total: {:?} ({:.0} attempts/s equivalent)"
+            ),
+            seed_elapsed,
+            f64::from(ITERATIONS) / seed_elapsed.as_secs_f64(),
+            spending_node_elapsed,
+            f64::from(ITERATIONS) / spending_node_elapsed.as_secs_f64(),
+            viewing_node_elapsed,
+            f64::from(ITERATIONS) / viewing_node_elapsed.as_secs_f64(),
+            spending_public_elapsed,
+            f64::from(ITERATIONS) / spending_public_elapsed.as_secs_f64(),
+            viewing_public_elapsed,
+            f64::from(ITERATIONS) / viewing_public_elapsed.as_secs_f64(),
+            nullifying_elapsed,
+            f64::from(ITERATIONS) / nullifying_elapsed.as_secs_f64(),
+            master_public_elapsed,
+            f64::from(ITERATIONS) / master_public_elapsed.as_secs_f64(),
+            total_elapsed,
+            f64::from(ITERATIONS) / total_elapsed.as_secs_f64(),
         );
     }
 }

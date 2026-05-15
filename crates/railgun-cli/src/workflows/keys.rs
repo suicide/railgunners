@@ -91,6 +91,13 @@ pub(crate) fn derive_wallet_keys(
     wallet_index: u32,
 ) -> Result<DerivedWalletKeys, KeyDerivationError> {
     let seed = mnemonic.seed(None);
+    derive_wallet_keys_from_seed(&seed, wallet_index)
+}
+
+pub(crate) fn derive_wallet_keys_from_seed(
+    seed: &[u8],
+    wallet_index: u32,
+) -> Result<DerivedWalletKeys, KeyDerivationError> {
     let spending_path = spending_path(wallet_index)?;
     let viewing_path = viewing_path(wallet_index)?;
     let spending_node = railgun_core::derive_spending_node(&seed, wallet_index)?;
