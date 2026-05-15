@@ -3,7 +3,7 @@
 use core::fmt;
 
 use bech32::primitives::decode::CheckedHrpstring;
-use bech32::{Bech32m, Hrp};
+use bech32::{Bech32m, ByteIterExt, Fe32IterExt, Hrp};
 use num_bigint::BigUint;
 use railgun_types::{
     ChainScope, MasterPublicKey, NetworkId, RailgunAddress, RailgunAddressData, ViewingPublicKey,
@@ -117,6 +117,26 @@ fn master_public_key_to_bytes(
     Ok(padded)
 }
 
+fn encode_address_payload(
+    version: u8,
+    master_public_key: &MasterPublicKey,
+    chain_scope: ChainScope,
+    viewing_public_key: &ViewingPublicKey,
+) -> Result<[u8; ADDRESS_PAYLOAD_LENGTH], AddressEncodingError> {
+    if version != ADDRESS_VERSION_V1 {
+        return Err(AddressEncodingError::UnsupportedVersion(version));
+    }
+
+    let master_public_key = master_public_key_to_bytes(master_public_key)?;
+    let network_id = encode_network_id(chain_scope)?;
+    let mut payload = [0_u8; ADDRESS_PAYLOAD_LENGTH];
+    payload[0] = version;
+    payload[MASTER_PUBLIC_KEY_OFFSET..NETWORK_ID_OFFSET].copy_from_slice(&master_public_key);
+    payload[NETWORK_ID_OFFSET..VIEWING_PUBLIC_KEY_OFFSET].copy_from_slice(network_id.as_bytes());
+    payload[VIEWING_PUBLIC_KEY_OFFSET..].copy_from_slice(viewing_public_key.as_bytes());
+    Ok(payload)
+}
+
 impl From<NetworkIdError> for AddressEncodingError {
     fn from(error: NetworkIdError) -> Self {
         match error {
@@ -148,18 +168,8 @@ pub fn encode_railgun_address(
     chain_scope: ChainScope,
     viewing_public_key: &ViewingPublicKey,
 ) -> Result<RailgunAddress, AddressEncodingError> {
-    if version != ADDRESS_VERSION_V1 {
-        return Err(AddressEncodingError::UnsupportedVersion(version));
-    }
-
-    let master_public_key = master_public_key_to_bytes(master_public_key)?;
-    let network_id = encode_network_id(chain_scope)?;
-    let mut payload = Vec::with_capacity(ADDRESS_PAYLOAD_LENGTH);
-    payload.push(version);
-    payload.extend_from_slice(&master_public_key);
-    payload.extend_from_slice(network_id.as_bytes());
-    payload.extend_from_slice(viewing_public_key.as_bytes());
-
+    let payload =
+        encode_address_payload(version, master_public_key, chain_scope, viewing_public_key)?;
     let hrp = Hrp::parse(ADDRESS_HRP).map_err(|_| AddressEncodingError::InvalidBech32mEncoding)?;
     let address = bech32::encode::<Bech32m>(hrp, &payload)
         .map_err(|_| AddressEncodingError::InvalidBech32mEncoding)?;
@@ -169,6 +179,37 @@ pub fn encode_railgun_address(
     }
 
     RailgunAddress::parse(&address).map_err(|_| AddressEncodingError::InvalidBech32mEncoding)
+}
+
+/// Encodes the first `char_count` characters of a canonical `0zk` Railgun address.
+///
+/// This is intended for search and filtering workloads that only need a leading
+/// prefix of the final bech32m address.
+///
+/// # Errors
+///
+/// Returns an error if `version` is unsupported, if `master_public_key` does
+/// not fit the canonical 32-byte payload field, or if internal `bech32m`
+/// preparation fails unexpectedly.
+pub fn encode_railgun_address_prefix(
+    version: u8,
+    master_public_key: &MasterPublicKey,
+    chain_scope: ChainScope,
+    viewing_public_key: &ViewingPublicKey,
+    char_count: usize,
+) -> Result<String, AddressEncodingError> {
+    let payload =
+        encode_address_payload(version, master_public_key, chain_scope, viewing_public_key)?;
+    let hrp = Hrp::parse(ADDRESS_HRP).map_err(|_| AddressEncodingError::InvalidBech32mEncoding)?;
+    let prefix = payload
+        .iter()
+        .copied()
+        .bytes_to_fes()
+        .with_checksum::<Bech32m>(&hrp)
+        .chars()
+        .take(char_count.min(ADDRESS_MAX_LENGTH))
+        .collect();
+    Ok(prefix)
 }
 
 /// Decodes and validates a canonical `0zk` Railgun address.
@@ -230,6 +271,7 @@ mod tests {
     use super::{
         ADDRESS_MAX_LENGTH, ADDRESS_PAYLOAD_LENGTH, ADDRESS_VERSION_V1, AddressDecodingError,
         AddressEncodingError, decode_railgun_address, encode_railgun_address,
+        encode_railgun_address_prefix,
     };
 
     #[test]
@@ -337,6 +379,37 @@ mod tests {
             address.as_str(),
             "0zk1q8hxknrs97q8pjxaagwthzc0df99rzmhl2xnlxmgv9akv32sua0kfrv7j6fe3z53llhxknrs97q8pjxaagwthzc0df99rzmhl2xnlxmgv9akv32sua0kg0zpzts"
         );
+    }
+
+    #[test]
+    fn encodes_address_prefix_matching_full_address() {
+        let master_public_key = MasterPublicKey::new(padded_hex_biguint(
+            "ee6b4c702f8070c8ddea1cbb8b0f6a4a518b77fa8d3f9b68617b664550e75f64",
+        ))
+        .unwrap_or_else(|_| panic!("test master public key should validate"));
+        let viewing_public_key = ViewingPublicKey::new(padded_hex_array::<32>(
+            "ee6b4c702f8070c8ddea1cbb8b0f6a4a518b77fa8d3f9b68617b664550e75f64",
+        ));
+        let address = encode_railgun_address(
+            1,
+            &master_public_key,
+            ChainScope::AllChains,
+            &viewing_public_key,
+        )
+        .unwrap_or_else(|_| panic!("address encoding should succeed"));
+
+        for length in [0, 1, 6, 10, 32, ADDRESS_MAX_LENGTH, ADDRESS_MAX_LENGTH + 10] {
+            let prefix = encode_railgun_address_prefix(
+                1,
+                &master_public_key,
+                ChainScope::AllChains,
+                &viewing_public_key,
+                length,
+            )
+            .unwrap_or_else(|_| panic!("address prefix encoding should succeed"));
+
+            assert_eq!(prefix, address.as_str()[..address.as_str().len().min(length)].to_owned());
+        }
     }
 
     #[test]

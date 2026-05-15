@@ -1,5 +1,6 @@
 use railgun_core::{
-    Bip39Error, Bip39Mnemonic, Bip39WordCount, encode_railgun_address, encode_shareable_viewing_key,
+    Bip39Error, Bip39Mnemonic, Bip39WordCount, encode_railgun_address,
+    encode_railgun_address_prefix, encode_shareable_viewing_key,
 };
 use railgun_types::{ChainScope, RailgunAddress, ShareableViewingKeyData};
 use std::{
@@ -281,6 +282,8 @@ fn worker_loop<F>(
 {
     while !stop.load(Ordering::Relaxed) {
         let attempt = attempts.fetch_add(1, Ordering::Relaxed) + 1;
+        let should_report_progress =
+            options.progress_every != 0 && attempt % options.progress_every == 0;
         if options.max_attempts.is_some_and(|max_attempts| attempt > max_attempts) {
             return;
         }
@@ -304,6 +307,42 @@ fn worker_loop<F>(
                 return;
             }
         };
+        let fast_stem_match = match matches_fast_stem_filters(&derived, options) {
+            Ok(matches) => matches,
+            Err(error) => {
+                send_worker_failure(sender, stop, error);
+                return;
+            }
+        };
+        if !fast_stem_match {
+            if should_report_progress {
+                let candidate_address = match encode_railgun_address(
+                    1,
+                    derived.master_public_key(),
+                    ChainScope::AllChains,
+                    derived.viewing_public_key(),
+                ) {
+                    Ok(address) => address,
+                    Err(error) => {
+                        send_worker_failure(
+                            sender,
+                            stop,
+                            AddressSearchError::AddressEncoding(error.to_string()),
+                        );
+                        return;
+                    }
+                };
+                report_progress(
+                    worker_id,
+                    attempt,
+                    &candidate_address,
+                    minimum_lower_than,
+                    options,
+                    json,
+                );
+            }
+            continue;
+        }
         let candidate_address = match encode_railgun_address(
             1,
             derived.master_public_key(),
@@ -405,14 +444,49 @@ fn matches_search_filters(
 
     minimum_lower_than
         .is_none_or(|minimum_lower_than| candidate_address.as_str() < minimum_lower_than.as_str())
-        && options
-            .leading_zeroes
-            .is_none_or(|leading_zeroes| count_leading_zeroes(candidate_suffix) >= leading_zeroes)
-        && options.prefix.as_deref().is_none_or(|prefix| candidate_suffix.starts_with(prefix))
+        && matches_stem_filters(candidate_suffix, options)
         && options
             .suffix
             .as_deref()
             .is_none_or(|suffix| candidate_address.as_str().ends_with(suffix))
+}
+
+fn matches_fast_stem_filters(
+    derived: &crate::workflows::keys::DerivedWalletKeys,
+    options: &AddressSearchOptions,
+) -> Result<bool, AddressSearchError> {
+    let Some(prefix_length) = required_stem_prefix_length(options) else {
+        return Ok(true);
+    };
+
+    let candidate_prefix = encode_railgun_address_prefix(
+        1,
+        derived.master_public_key(),
+        ChainScope::AllChains,
+        derived.viewing_public_key(),
+        prefix_length,
+    )
+    .map_err(|error| AddressSearchError::AddressEncoding(error.to_string()))?;
+    let Some(candidate_suffix) = candidate_prefix.as_str().strip_prefix(ALL_CHAINS_ADDRESS_STEM)
+    else {
+        return Err(AddressSearchError::AddressEncoding(
+            "all-chains address must use the 0zk1qy stem".to_owned(),
+        ));
+    };
+    Ok(matches_stem_filters(candidate_suffix, options))
+}
+
+fn required_stem_prefix_length(options: &AddressSearchOptions) -> Option<usize> {
+    let stem_relative_length =
+        options.leading_zeroes.unwrap_or(0).max(options.prefix.as_ref().map_or(0, String::len));
+    (stem_relative_length > 0).then_some(ALL_CHAINS_ADDRESS_STEM.len() + stem_relative_length)
+}
+
+fn matches_stem_filters(candidate_suffix: &str, options: &AddressSearchOptions) -> bool {
+    options
+        .leading_zeroes
+        .is_none_or(|leading_zeroes| count_leading_zeroes(candidate_suffix) >= leading_zeroes)
+        && options.prefix.as_deref().is_none_or(|prefix| candidate_suffix.starts_with(prefix))
 }
 
 fn count_leading_zeroes(value: &str) -> usize {

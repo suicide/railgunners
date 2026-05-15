@@ -28,6 +28,7 @@ use railgun_types::{Address, ChainId, TxHash};
 
 pub use address::{
     AddressDecodingError, AddressEncodingError, decode_railgun_address, encode_railgun_address,
+    encode_railgun_address_prefix,
 };
 pub use bip39::{Bip39Error, Bip39Mnemonic, Bip39WordCount};
 pub use blinding::{BlindingError, derive_note_blinding_keys, unblind_note_key};
