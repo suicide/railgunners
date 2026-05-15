@@ -72,7 +72,7 @@ Current address commands:
 railguncli address encode --master-public-key "0000000000000000000000000000000000000000000000000000000000000000" --chain-type 0 --chain-id 1 --viewing-public-key "0000000000000000000000000000000000000000000000000000000000000000" --json
 railguncli address decode --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
 railguncli address validate --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
-railguncli address search --lower-than "0zk1qy0000k0k4w2akdev8ju4z7yp4w4x0zz9ehxdqe9chsjuujeklwdtrv7j6fe3z53lug74ey6tjlpk2xlfdp2pnfnc4972qwpk9fvhafqtrv9ctnxgjhush3njwh" --lower-than "0zk1qyduss9nnfyycfwt03fwds69c7z27rmmulcxsq3lvn0yhwjxfa7lnrv7j6fe3z53la7dxtysu5dtqp9lh6k6qeft3j5cvawwdq7zx6t9ltsncagyz06wk4n66nt" --prefix dus --suffix nt --jobs 8 --progress-every 1000 --show-secrets --json
+railguncli address search --lower-than "0zk1qy0000k0k4w2akdev8ju4z7yp4w4x0zz9ehxdqe9chsjuujeklwdtrv7j6fe3z53lug74ey6tjlpk2xlfdp2pnfnc4972qwpk9fvhafqtrv9ctnxgjhush3njwh" --lower-than "0zk1qyduss9nnfyycfwt03fwds69c7z27rmmulcxsq3lvn0yhwjxfa7lnrv7j6fe3z53la7dxtysu5dtqp9lh6k6qeft3j5cvawwdq7zx6t9ltsncagyz06wk4n66nt" --leading-zeroes 4 --prefix 0000dus --suffix nt --jobs 8 --progress-every 1000 --show-secrets --json
 ```
 
 Notes:
@@ -84,8 +84,9 @@ Notes:
 - `address validate` exits non-zero for malformed input and returns stable JSON in `--json` mode
 - `address search` searches only all-chains `0zk` addresses and can optionally compare against the minimum repeatable `--lower-than`
 - `address search` requires `--show-secrets` because success output includes the mnemonic and view-only secrets
-- `address search` requires at least one of `--lower-than`, `--prefix`, or `--suffix`
-- `address search` supports `--jobs`, `--progress-every`, `--max-attempts`, and combinable `--lower-than`, `--prefix`, and `--suffix` filters
+- `address search` requires at least one of `--lower-than`, `--leading-zeroes`, `--prefix`, or `--suffix`
+- `address search` supports `--jobs`, `--progress-every`, `--max-attempts`, and combinable `--lower-than`, `--leading-zeroes`, `--prefix`, and `--suffix` filters
+- `--leading-zeroes` counts literal `0` characters immediately after the all-chains `0zk1qy` stem and stops on the first match meeting the threshold
 
 Current mnemonic commands:
 

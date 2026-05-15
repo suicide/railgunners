@@ -36,6 +36,7 @@ pub(crate) fn execute(command: AddressCommand, stdout: &mut dyn Write) -> Result
         AddressCommand::Validate { address, json } => execute_validate(stdout, &address, json)?,
         AddressCommand::Search {
             lower_than_addresses,
+            leading_zeroes,
             word_count,
             index,
             prefix,
@@ -48,6 +49,7 @@ pub(crate) fn execute(command: AddressCommand, stdout: &mut dyn Write) -> Result
         } => execute_search(
             stdout,
             &lower_than_addresses,
+            leading_zeroes,
             word_count,
             index,
             prefix.as_deref(),
@@ -126,6 +128,7 @@ fn execute_validate(stdout: &mut dyn Write, address: &str, json: bool) -> Result
 fn execute_search(
     stdout: &mut dyn Write,
     lower_than_addresses: &[String],
+    leading_zeroes: Option<usize>,
     word_count: usize,
     index: u32,
     prefix: Option<&str>,
@@ -148,9 +151,14 @@ fn execute_search(
         .collect::<Result<Vec<_>, _>>()?;
     let prefix = prefix.map(|value| parse_prefix(value, json)).transpose()?;
     let suffix = suffix.map(|value| parse_suffix(value, json)).transpose()?;
-    if lower_than_addresses.is_empty() && prefix.is_none() && suffix.is_none() {
+    if lower_than_addresses.is_empty()
+        && leading_zeroes.is_none()
+        && prefix.is_none()
+        && suffix.is_none()
+    {
         return Err(CliError::command(
-            "at least one of --lower-than, --prefix, or --suffix is required".to_owned(),
+            "at least one of --lower-than, --leading-zeroes, --prefix, or --suffix is required"
+                .to_owned(),
             json,
         ));
     }
@@ -163,6 +171,7 @@ fn execute_search(
     let result = search_address(
         AddressSearchOptions {
             lower_than_addresses,
+            leading_zeroes,
             word_count,
             index,
             prefix,
@@ -222,6 +231,9 @@ fn write_text_search(stdout: &mut dyn Write, result: &AddressSearchMatch) -> Res
     writeln!(stdout, "wordCount: {}", result.word_count())?;
     if let Some(prefix) = result.prefix() {
         writeln!(stdout, "prefix: {prefix}")?;
+    }
+    if let Some(leading_zeroes) = result.leading_zeroes() {
+        writeln!(stdout, "leadingZeroes: {leading_zeroes}")?;
     }
     if let Some(suffix) = result.suffix() {
         writeln!(stdout, "suffix: {suffix}")?;
@@ -331,6 +343,8 @@ struct SearchJson<'a> {
     word_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     prefix: Option<&'a str>,
+    #[serde(rename = "leadingZeroes", skip_serializing_if = "Option::is_none")]
+    leading_zeroes: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     suffix: Option<&'a str>,
     #[serde(rename = "viewingPrivateKey")]
@@ -355,6 +369,7 @@ impl<'a> SearchJson<'a> {
             index: result.index(),
             word_count: result.word_count(),
             prefix: result.prefix(),
+            leading_zeroes: result.leading_zeroes(),
             suffix: result.suffix(),
             viewing_private_key: result.viewing_private_key_hex(),
             packed_spending_public_key: result.packed_spending_public_key_hex(),
@@ -391,6 +406,34 @@ mod tests {
         let address = RailgunAddress::parse(sample_lower_than())
             .unwrap_or_else(|_| panic!("sample lower-than address should parse"));
         address.as_str()[address.as_str().len() - 3..].to_owned()
+    }
+
+    #[test]
+    fn search_accepts_leading_zeroes_as_filter() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railguncli",
+                "address",
+                "search",
+                "--leading-zeroes",
+                "0",
+                "--show-secrets",
+                "--max-attempts",
+                "0",
+                "--json",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert_eq!(
+            String::from_utf8_lossy(&stdout),
+            "{\"error\":\"no matching address found in 0 attempts\"}\n"
+        );
+        assert!(stderr.is_empty());
     }
 
     #[test]
@@ -552,7 +595,7 @@ mod tests {
         assert!(stdout.is_empty());
         assert_eq!(
             String::from_utf8_lossy(&stderr),
-            "at least one of --lower-than, --prefix, or --suffix is required\n"
+            "at least one of --lower-than, --leading-zeroes, --prefix, or --suffix is required\n"
         );
     }
 

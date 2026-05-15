@@ -76,6 +76,9 @@ pub(crate) enum AddressCommand {
         /// Optional lower bounds. When provided, the search matches addresses smaller than the minimum.
         #[arg(long = "lower-than")]
         lower_than_addresses: Vec<String>,
+        /// Optional minimum number of literal `0` characters immediately after the all-chains `0zk1qy` stem.
+        #[arg(long = "leading-zeroes")]
+        leading_zeroes: Option<usize>,
         /// Number of BIP-39 words to generate.
         #[arg(long = "word-count", default_value_t = 12)]
         word_count: usize,

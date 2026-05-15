@@ -22,6 +22,7 @@ const ALL_CHAINS_ADDRESS_STEM: &str = "0zk1qy";
 #[derive(Clone, Debug)]
 pub(crate) struct AddressSearchOptions {
     pub(crate) lower_than_addresses: Vec<RailgunAddress>,
+    pub(crate) leading_zeroes: Option<usize>,
     pub(crate) word_count: Bip39WordCount,
     pub(crate) index: u32,
     pub(crate) prefix: Option<String>,
@@ -39,6 +40,7 @@ pub(crate) struct AddressSearchMatch {
     index: u32,
     word_count: usize,
     prefix: Option<String>,
+    leading_zeroes: Option<usize>,
     suffix: Option<String>,
     viewing_private_key_hex: String,
     packed_spending_public_key_hex: String,
@@ -56,6 +58,7 @@ impl AddressSearchMatch {
         index: u32,
         word_count: usize,
         prefix: Option<String>,
+        leading_zeroes: Option<usize>,
         suffix: Option<String>,
         viewing_private_key_hex: String,
         packed_spending_public_key_hex: String,
@@ -70,6 +73,7 @@ impl AddressSearchMatch {
             index,
             word_count,
             prefix,
+            leading_zeroes,
             suffix,
             viewing_private_key_hex,
             packed_spending_public_key_hex,
@@ -107,6 +111,11 @@ impl AddressSearchMatch {
     #[must_use]
     pub(crate) fn prefix(&self) -> Option<&str> {
         self.prefix.as_deref()
+    }
+
+    #[must_use]
+    pub(crate) const fn leading_zeroes(&self) -> Option<usize> {
+        self.leading_zeroes
     }
 
     #[must_use]
@@ -284,7 +293,6 @@ fn worker_loop<F>(
             }
         };
 
-        let phrase = mnemonic.phrase();
         let derived = match derive_wallet_keys(&mnemonic, options.index) {
             Ok(derived) => derived,
             Err(error) => {
@@ -296,18 +304,6 @@ fn worker_loop<F>(
                 return;
             }
         };
-        let packed_spending_public_key =
-            match pack_derived_spending_public_key(derived.spending_public_key()) {
-                Ok(key) => key,
-                Err(error) => {
-                    send_worker_failure(
-                        sender,
-                        stop,
-                        AddressSearchError::ViewingKeyEncoding(error.to_string()),
-                    );
-                    return;
-                }
-            };
         let candidate_address = match encode_railgun_address(
             1,
             derived.master_public_key(),
@@ -328,10 +324,22 @@ fn worker_loop<F>(
         report_progress(worker_id, attempt, &candidate_address, minimum_lower_than, options, json);
 
         if matches_search_filters(&candidate_address, minimum_lower_than, options) {
+            let packed_spending_public_key =
+                match pack_derived_spending_public_key(derived.spending_public_key()) {
+                    Ok(key) => key,
+                    Err(error) => {
+                        send_worker_failure(
+                            sender,
+                            stop,
+                            AddressSearchError::ViewingKeyEncoding(error.to_string()),
+                        );
+                        return;
+                    }
+                };
             let result = match build_search_match(
                 minimum_lower_than,
                 candidate_address,
-                phrase,
+                mnemonic.phrase(),
                 &derived,
                 packed_spending_public_key,
                 options,
@@ -390,18 +398,25 @@ fn matches_search_filters(
     minimum_lower_than: Option<&RailgunAddress>,
     options: &AddressSearchOptions,
 ) -> bool {
+    let Some(candidate_suffix) = candidate_address.as_str().strip_prefix(ALL_CHAINS_ADDRESS_STEM)
+    else {
+        return false;
+    };
+
     minimum_lower_than
         .is_none_or(|minimum_lower_than| candidate_address.as_str() < minimum_lower_than.as_str())
-        && options.prefix.as_deref().is_none_or(|prefix| {
-            candidate_address
-                .as_str()
-                .strip_prefix(ALL_CHAINS_ADDRESS_STEM)
-                .is_some_and(|rest| rest.starts_with(prefix))
-        })
+        && options
+            .leading_zeroes
+            .is_none_or(|leading_zeroes| count_leading_zeroes(candidate_suffix) >= leading_zeroes)
+        && options.prefix.as_deref().is_none_or(|prefix| candidate_suffix.starts_with(prefix))
         && options
             .suffix
             .as_deref()
             .is_none_or(|suffix| candidate_address.as_str().ends_with(suffix))
+}
+
+fn count_leading_zeroes(value: &str) -> usize {
+    value.bytes().take_while(|byte| *byte == b'0').count()
 }
 
 fn build_search_match(
@@ -427,6 +442,7 @@ fn build_search_match(
         options.index,
         options.word_count.as_usize(),
         options.prefix.clone(),
+        options.leading_zeroes,
         options.suffix.clone(),
         hex::encode(derived.viewing_private_key().as_bytes()),
         packed_spending_public_key_hex,
@@ -440,7 +456,7 @@ fn build_search_match(
 mod tests {
     use super::{
         ALL_CHAINS_ADDRESS_STEM, AddressSearchError, AddressSearchMatch, AddressSearchOptions,
-        search_address_with_generator,
+        count_leading_zeroes, search_address_with_generator,
     };
     use crate::workflows::keys::derive_wallet_keys;
     use railgun_core::{Bip39Mnemonic, Bip39WordCount, encode_railgun_address};
@@ -466,6 +482,7 @@ mod tests {
 
     fn deterministic_search_result(
         lower_than_addresses: Vec<RailgunAddress>,
+        leading_zeroes: Option<usize>,
         prefix: Option<String>,
         suffix: Option<String>,
     ) -> AddressSearchMatch {
@@ -477,6 +494,7 @@ mod tests {
         match search_address_with_generator(
             AddressSearchOptions {
                 lower_than_addresses,
+                leading_zeroes,
                 word_count: Bip39WordCount::Words12,
                 index: 0,
                 prefix,
@@ -523,7 +541,7 @@ mod tests {
             .take(4)
             .collect::<String>();
 
-        let result = deterministic_search_result(Vec::new(), Some(prefix.clone()), None);
+        let result = deterministic_search_result(Vec::new(), None, Some(prefix.clone()), None);
 
         assert_eq!(result.minimum_lower_than_address(), None);
         assert_eq!(result.prefix(), Some(prefix.as_str()));
@@ -537,6 +555,7 @@ mod tests {
                 lower_than_addresses: vec![address(
                     "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca",
                 )],
+                leading_zeroes: None,
                 word_count: Bip39WordCount::Words12,
                 index: 0,
                 prefix: None,
@@ -570,7 +589,7 @@ mod tests {
         )
         .unwrap_or_else(|_| panic!("test address encoding should succeed"));
         let target_address = candidate_target_greater_than(&derived_address);
-        let result = deterministic_search_result(vec![target_address.clone()], None, None);
+        let result = deterministic_search_result(vec![target_address.clone()], None, None, None);
 
         assert_eq!(result.index(), 0);
         assert_eq!(result.word_count(), 12);
@@ -611,6 +630,7 @@ mod tests {
         let target_address = candidate_target_greater_than(&derived_address);
         let result = deterministic_search_result(
             vec![target_address.clone()],
+            None,
             Some(prefix.clone()),
             Some(suffix.clone()),
         );
@@ -637,10 +657,51 @@ mod tests {
         .unwrap_or_else(|_| panic!("test address encoding should succeed"));
         let suffix = derived_address.as_str()[derived_address.as_str().len() - 4..].to_owned();
 
-        let result = deterministic_search_result(Vec::new(), None, Some(suffix.clone()));
+        let result = deterministic_search_result(Vec::new(), None, None, Some(suffix.clone()));
 
         assert_eq!(result.minimum_lower_than_address(), None);
         assert_eq!(result.suffix(), Some(suffix.as_str()));
         assert_eq!(result.derived_address(), &derived_address);
+    }
+
+    #[test]
+    fn supports_leading_zeroes_only_search_without_lower_bound() {
+        let result = deterministic_search_result(Vec::new(), Some(0), None, None);
+
+        assert_eq!(result.minimum_lower_than_address(), None);
+        assert_eq!(result.leading_zeroes(), Some(0));
+    }
+
+    #[test]
+    fn finds_match_with_combined_leading_zeroes_and_prefix_filters() {
+        let mnemonic = Bip39Mnemonic::parse(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        )
+        .unwrap_or_else(|_| panic!("test mnemonic should parse"));
+        let derived = derive_wallet_keys(&mnemonic, 0)
+            .unwrap_or_else(|_| panic!("test wallet derivation should succeed"));
+        let derived_address = encode_railgun_address(
+            1,
+            derived.master_public_key(),
+            ChainScope::AllChains,
+            derived.viewing_public_key(),
+        )
+        .unwrap_or_else(|_| panic!("test address encoding should succeed"));
+        let stem_suffix = derived_address
+            .as_str()
+            .strip_prefix(ALL_CHAINS_ADDRESS_STEM)
+            .unwrap_or_else(|| panic!("derived address should use the all-chains stem"));
+        let leading_zeroes = count_leading_zeroes(stem_suffix);
+        let prefix = stem_suffix.chars().take(leading_zeroes + 2).collect::<String>();
+
+        let result = deterministic_search_result(
+            Vec::new(),
+            Some(leading_zeroes),
+            Some(prefix.clone()),
+            None,
+        );
+
+        assert_eq!(result.leading_zeroes(), Some(leading_zeroes));
+        assert_eq!(result.prefix(), Some(prefix.as_str()));
     }
 }
