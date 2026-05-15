@@ -259,6 +259,8 @@ pub fn decode_railgun_address(address: &str) -> Result<RailgunAddressData, Addre
 #[cfg(test)]
 mod tests {
     use bech32::{Bech32m, Hrp};
+    use std::{hint::black_box, time::Instant};
+
     use num_bigint::BigUint;
     use railgun_types::{ChainScope, ChainType, MasterPublicKey, RailgunChain, ViewingPublicKey};
 
@@ -410,6 +412,56 @@ mod tests {
 
             assert_eq!(prefix, address.as_str()[..address.as_str().len().min(length)].to_owned());
         }
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_address_prefix_encoding_against_full_encoding() {
+        const ITERATIONS: usize = 20_000;
+
+        let master_public_key = MasterPublicKey::new(padded_hex_biguint(
+            "ee6b4c702f8070c8ddea1cbb8b0f6a4a518b77fa8d3f9b68617b664550e75f64",
+        ))
+        .unwrap_or_else(|_| panic!("test master public key should validate"));
+        let viewing_public_key = ViewingPublicKey::new(padded_hex_array::<32>(
+            "ee6b4c702f8070c8ddea1cbb8b0f6a4a518b77fa8d3f9b68617b664550e75f64",
+        ));
+
+        let prefix_start = Instant::now();
+        for _ in 0..ITERATIONS {
+            black_box(
+                encode_railgun_address_prefix(
+                    1,
+                    &master_public_key,
+                    ChainScope::AllChains,
+                    &viewing_public_key,
+                    10,
+                )
+                .unwrap_or_else(|_| panic!("address prefix encoding should succeed")),
+            );
+        }
+        let prefix_elapsed = prefix_start.elapsed();
+
+        let full_start = Instant::now();
+        for _ in 0..ITERATIONS {
+            black_box(
+                encode_railgun_address(
+                    1,
+                    &master_public_key,
+                    ChainScope::AllChains,
+                    &viewing_public_key,
+                )
+                .unwrap_or_else(|_| panic!("address encoding should succeed")),
+            );
+        }
+        let full_elapsed = full_start.elapsed();
+
+        eprintln!(
+            "partial prefix: {:?}, full address: {:?}, speedup: {:.2}x",
+            prefix_elapsed,
+            full_elapsed,
+            full_elapsed.as_secs_f64() / prefix_elapsed.as_secs_f64(),
+        );
     }
 
     #[test]

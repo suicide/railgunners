@@ -530,13 +530,18 @@ fn build_search_match(
 mod tests {
     use super::{
         ALL_CHAINS_ADDRESS_STEM, AddressSearchError, AddressSearchMatch, AddressSearchOptions,
-        count_leading_zeroes, search_address_with_generator,
+        count_leading_zeroes, matches_fast_stem_filters, matches_stem_filters,
+        search_address_with_generator,
     };
     use crate::workflows::keys::derive_wallet_keys;
     use railgun_core::{Bip39Mnemonic, Bip39WordCount, encode_railgun_address};
     use railgun_types::ChainScope;
     use railgun_types::RailgunAddress;
-    use std::sync::{Arc, Mutex};
+    use std::{
+        hint::black_box,
+        sync::{Arc, Mutex},
+        time::Instant,
+    };
 
     fn address(value: &str) -> RailgunAddress {
         RailgunAddress::parse(value).unwrap_or_else(|_| panic!("test address should parse"))
@@ -777,5 +782,135 @@ mod tests {
 
         assert_eq!(result.leading_zeroes(), Some(leading_zeroes));
         assert_eq!(result.prefix(), Some(prefix.as_str()));
+    }
+
+    fn full_address_matches_stem_filters(
+        derived: &crate::workflows::keys::DerivedWalletKeys,
+        options: &AddressSearchOptions,
+    ) -> bool {
+        let candidate_address = encode_railgun_address(
+            1,
+            derived.master_public_key(),
+            ChainScope::AllChains,
+            derived.viewing_public_key(),
+        )
+        .unwrap_or_else(|_| panic!("benchmark address encoding should succeed"));
+        let candidate_suffix = candidate_address
+            .as_str()
+            .strip_prefix(ALL_CHAINS_ADDRESS_STEM)
+            .unwrap_or_else(|| panic!("benchmark address should use the all-chains stem"));
+        matches_stem_filters(candidate_suffix, options)
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_fast_stem_filters_against_full_address_filtering() {
+        const ITERATIONS: u32 = 2_048;
+
+        let mnemonic = Bip39Mnemonic::parse(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        )
+        .unwrap_or_else(|_| panic!("test mnemonic should parse"));
+        let derived_keys = (0..ITERATIONS)
+            .map(|index| {
+                derive_wallet_keys(&mnemonic, index)
+                    .unwrap_or_else(|_| panic!("benchmark wallet derivation should succeed"))
+            })
+            .collect::<Vec<_>>();
+        let options = AddressSearchOptions {
+            lower_than_addresses: Vec::new(),
+            leading_zeroes: Some(4),
+            word_count: Bip39WordCount::Words12,
+            index: 0,
+            prefix: Some("0000".to_owned()),
+            suffix: None,
+            worker_count: 1,
+            progress_every: 0,
+            max_attempts: None,
+        };
+
+        let fast_start = Instant::now();
+        let fast_match_count = derived_keys
+            .iter()
+            .filter(|derived| {
+                black_box(
+                    matches_fast_stem_filters(derived, &options)
+                        .unwrap_or_else(|_| panic!("fast stem filtering should succeed")),
+                )
+            })
+            .count();
+        let fast_elapsed = fast_start.elapsed();
+
+        let full_start = Instant::now();
+        let full_match_count = derived_keys
+            .iter()
+            .filter(|derived| black_box(full_address_matches_stem_filters(derived, &options)))
+            .count();
+        let full_elapsed = full_start.elapsed();
+
+        assert_eq!(fast_match_count, full_match_count);
+        eprintln!(
+            "fast stem filter: {:?}, full address filter: {:?}, speedup: {:.2}x over {} candidates",
+            fast_elapsed,
+            full_elapsed,
+            full_elapsed.as_secs_f64() / fast_elapsed.as_secs_f64(),
+            ITERATIONS,
+        );
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_end_to_end_derive_and_filter_attempts() {
+        const ITERATIONS: u32 = 2_048;
+
+        let mnemonic = Bip39Mnemonic::parse(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        )
+        .unwrap_or_else(|_| panic!("test mnemonic should parse"));
+        let options = AddressSearchOptions {
+            lower_than_addresses: Vec::new(),
+            leading_zeroes: Some(4),
+            word_count: Bip39WordCount::Words12,
+            index: 0,
+            prefix: Some("0000".to_owned()),
+            suffix: None,
+            worker_count: 1,
+            progress_every: 0,
+            max_attempts: None,
+        };
+
+        let fast_start = Instant::now();
+        let fast_match_count = (0..ITERATIONS)
+            .filter(|index| {
+                let derived = derive_wallet_keys(&mnemonic, *index)
+                    .unwrap_or_else(|_| panic!("benchmark wallet derivation should succeed"));
+                black_box(
+                    matches_fast_stem_filters(&derived, &options)
+                        .unwrap_or_else(|_| panic!("fast stem filtering should succeed")),
+                )
+            })
+            .count();
+        let fast_elapsed = fast_start.elapsed();
+
+        let full_start = Instant::now();
+        let full_match_count = (0..ITERATIONS)
+            .filter(|index| {
+                let derived = derive_wallet_keys(&mnemonic, *index)
+                    .unwrap_or_else(|_| panic!("benchmark wallet derivation should succeed"));
+                black_box(full_address_matches_stem_filters(&derived, &options))
+            })
+            .count();
+        let full_elapsed = full_start.elapsed();
+
+        assert_eq!(fast_match_count, full_match_count);
+        eprintln!(
+            "end-to-end fast path: {:?} ({:.0} attempts/s), full path: {:?} ({:.0} attempts/s), speedup: {:.2}x over {} attempts",
+            fast_elapsed,
+            f64::from(ITERATIONS) / fast_elapsed.as_secs_f64(),
+            full_elapsed,
+            f64::from(ITERATIONS) / full_elapsed.as_secs_f64(),
+            full_elapsed.as_secs_f64() / fast_elapsed.as_secs_f64(),
+            ITERATIONS,
+        );
     }
 }
