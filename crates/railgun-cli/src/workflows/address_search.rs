@@ -338,7 +338,7 @@ where
         match receiver.recv() {
             Ok(WorkerMessage::Found(found)) => {
                 stop.store(true, Ordering::Relaxed);
-                Ok(found)
+                Ok(*found)
             }
             Ok(WorkerMessage::Failed(error)) => {
                 stop.store(true, Ordering::Relaxed);
@@ -358,7 +358,7 @@ where
 }
 
 enum WorkerMessage {
-    Found(AddressSearchMatch),
+    Found(Box<AddressSearchMatch>),
     Failed(AddressSearchError),
 }
 
@@ -474,7 +474,7 @@ fn worker_loop<F>(
                 }
             };
             stop.store(true, Ordering::Relaxed);
-            let _ = sender.send(WorkerMessage::Found(result));
+            let _ = sender.send(WorkerMessage::Found(Box::new(result)));
             return;
         }
     }
@@ -1119,6 +1119,7 @@ mod tests {
 
     #[test]
     #[ignore = "benchmark"]
+    #[allow(clippy::too_many_lines)]
     fn bench_derivation_stage_breakdown() {
         const ITERATIONS: u32 = 2_048;
 

@@ -100,8 +100,8 @@ pub(crate) fn derive_wallet_keys_from_seed(
 ) -> Result<DerivedWalletKeys, KeyDerivationError> {
     let spending_path = spending_path(wallet_index)?;
     let viewing_path = viewing_path(wallet_index)?;
-    let spending_node = railgun_core::derive_spending_node(&seed, wallet_index)?;
-    let viewing_node = railgun_core::derive_viewing_node(&seed, wallet_index)?;
+    let spending_node = railgun_core::derive_spending_node(seed, wallet_index)?;
+    let viewing_node = railgun_core::derive_viewing_node(seed, wallet_index)?;
     let spending_private_key = spending_private_key_from_node(&spending_node);
     let viewing_private_key = viewing_private_key_from_node(&viewing_node);
     let spending_public_key = derive_spending_public_key(&spending_private_key)?;
