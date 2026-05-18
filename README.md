@@ -110,6 +110,7 @@ Current key commands:
 
 ```sh
 railguncli keys derive --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --index 0 --show-secrets --json
+railguncli keys derive --raw-seed "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4" --index 0 --show-secrets --json
 railguncli keys inspect-viewing-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
 railguncli keys inspect-spending-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
 railguncli keys inspect-master-public --spending-public-key-x "15684838006997671713939066069845237677934334329285343229142447933587909549584" --spending-public-key-y "11878614856120328179849762231924033298788609151532558727282528569229552954628" --nullifying-key "8368299126798249740586535953124199418524409103803955764525436743456763691384" --json
@@ -119,8 +120,10 @@ Notes:
 
 - `keys derive` uses canonical Railgun wallet paths for the requested `--index`
 - `keys derive` defaults `--index` to `0`
+- `keys derive` requires exactly one of `--mnemonic` or `--raw-seed`
 - `keys derive` requires `--show-secrets` because it emits private keys
 - `keys derive` also emits `packedSpendingPublicKey` so it can feed `viewing-key encode`
+- `address search --seed-mode raw` output can be ingested directly with `keys derive --raw-seed`
 - `inspect-viewing-private` derives `viewingPublicKey` and `nullifyingKey`
 - `inspect-spending-private` derives `spendingPublicKey`
 - `inspect-master-public` derives `masterPublicKey` from decimal public inputs

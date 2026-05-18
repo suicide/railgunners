@@ -35,6 +35,10 @@ pub(crate) fn parse_spending_private_key(
     Ok(SpendingPrivateKey::new(bytes))
 }
 
+pub(crate) fn parse_raw_seed(value: &str, json: bool) -> Result<[u8; 64], CliError> {
+    parse_hex::<64>(value, "raw seed", json)
+}
+
 pub(crate) fn parse_packed_spending_public_key(
     value: &str,
     json: bool,

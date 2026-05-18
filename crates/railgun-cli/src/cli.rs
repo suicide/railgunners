@@ -159,9 +159,12 @@ pub(crate) enum MnemonicCommand {
 pub(crate) enum KeysCommand {
     /// Derive canonical Railgun keys from a mnemonic and wallet index.
     Derive {
-        /// The mnemonic phrase to derive from.
+        /// The mnemonic phrase to derive from. Mutually exclusive with `--raw-seed`.
         #[arg(long)]
-        mnemonic: String,
+        mnemonic: Option<String>,
+        /// The 64-byte seed as lowercase or uppercase hex. Mutually exclusive with `--mnemonic`.
+        #[arg(long = "raw-seed")]
+        raw_seed: Option<String>,
         /// The canonical Railgun wallet index.
         #[arg(long, default_value_t = 0)]
         index: u32,

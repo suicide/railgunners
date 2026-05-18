@@ -2,10 +2,13 @@ use crate::{
     cli::KeysCommand,
     error::CliError,
     output::write_json,
-    parse::{parse_decimal_biguint, parse_spending_private_key, parse_viewing_private_key},
+    parse::{
+        parse_decimal_biguint, parse_raw_seed, parse_spending_private_key,
+        parse_viewing_private_key,
+    },
     workflows::keys::{
-        DerivedWalletKeys, derive_wallet_keys, inspect_master_public_key,
-        inspect_spending_private_key, inspect_viewing_private_key,
+        DerivedWalletKeys, derive_wallet_keys, derive_wallet_keys_from_seed,
+        inspect_master_public_key, inspect_spending_private_key, inspect_viewing_private_key,
         pack_derived_spending_public_key,
     },
 };
@@ -15,8 +18,15 @@ use std::io::Write;
 
 pub(crate) fn execute(command: KeysCommand, stdout: &mut dyn Write) -> Result<(), CliError> {
     match command {
-        KeysCommand::Derive { mnemonic, index, show_secrets, json } => {
-            execute_derive(&mnemonic, index, show_secrets, json, stdout)?;
+        KeysCommand::Derive { mnemonic, raw_seed, index, show_secrets, json } => {
+            execute_derive(
+                mnemonic.as_deref(),
+                raw_seed.as_deref(),
+                index,
+                show_secrets,
+                json,
+                stdout,
+            )?;
         }
         KeysCommand::InspectViewingPrivate { private_key, json } => {
             let private_key = parse_viewing_private_key(&private_key, json)?;
@@ -92,7 +102,8 @@ pub(crate) fn execute(command: KeysCommand, stdout: &mut dyn Write) -> Result<()
 }
 
 fn execute_derive(
-    mnemonic: &str,
+    mnemonic: Option<&str>,
+    raw_seed: Option<&str>,
     index: u32,
     show_secrets: bool,
     json: bool,
@@ -102,10 +113,31 @@ fn execute_derive(
         return Err(CliError::command("key derivation requires --show-secrets".to_owned(), json));
     }
 
-    let mnemonic = railgun_core::Bip39Mnemonic::parse(mnemonic)
-        .map_err(|error| CliError::command(format!("invalid: {error}"), json))?;
-    let derived = derive_wallet_keys(&mnemonic, index)
-        .map_err(|error| CliError::command(error.to_string(), json))?;
+    let derived = match (mnemonic, raw_seed) {
+        (Some(mnemonic), None) => {
+            let mnemonic = railgun_core::Bip39Mnemonic::parse(mnemonic)
+                .map_err(|error| CliError::command(format!("invalid: {error}"), json))?;
+            derive_wallet_keys(&mnemonic, index)
+                .map_err(|error| CliError::command(error.to_string(), json))?
+        }
+        (None, Some(raw_seed)) => {
+            let raw_seed = parse_raw_seed(raw_seed, json)?;
+            derive_wallet_keys_from_seed(&raw_seed, index)
+                .map_err(|error| CliError::command(error.to_string(), json))?
+        }
+        (Some(_), Some(_)) => {
+            return Err(CliError::command(
+                "key derivation requires exactly one of --mnemonic or --raw-seed".to_owned(),
+                json,
+            ));
+        }
+        (None, None) => {
+            return Err(CliError::command(
+                "key derivation requires one of --mnemonic or --raw-seed".to_owned(),
+                json,
+            ));
+        }
+    };
     let packed_spending_public_key =
         pack_derived_spending_public_key(derived.spending_public_key())
             .map_err(|error| CliError::command(error.to_string(), json))?;
@@ -274,6 +306,107 @@ mod tests {
         assert_eq!(exit_code, 1);
         assert!(stdout.is_empty());
         assert_eq!(String::from_utf8_lossy(&stderr), "key derivation requires --show-secrets\n");
+    }
+
+    #[test]
+    fn derives_keys_from_raw_seed_as_json() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railguncli",
+                "keys",
+                "derive",
+                "--raw-seed",
+                "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4",
+                "--show-secrets",
+                "--json",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 0);
+        assert_eq!(
+            String::from_utf8_lossy(&stdout),
+            "{\"index\":0,\"spendingPath\":\"m/44'/1984'/0'/0'/0'\",\"viewingPath\":\"m/420'/1984'/0'/0'/0'\",\"spendingPrivateKey\":\"08b2d974aa7fffd9d068b78c34434c534ddcd9343fcbf5aa12cf78e1a3c1ccb9\",\"spendingPublicKey\":{\"x\":\"21725194683971601625357993914711234354000760307317172095138789827480990690892\",\"y\":\"18185059732936663794890181151638097537207598791675324797050194801074344044960\"},\"packedSpendingPublicKey\":\"a029cc8b973c5ee7d592c5fbeb2d5e063908ebc8c0ed64a639e7c91e0a6134a8\",\"viewingPrivateKey\":\"9a9e1ca3b9476dc8500b43f30f34104c92a3eedfd727757ffd0ad15da8e11572\",\"viewingPublicKey\":\"df2dfb942aa6fb8cf9fe60d7984cd10b20b59027e677ecb4960d764f7d42408a\",\"nullifyingKey\":\"11357301776152573321369788690304620243322420398401862164527624501081803879965\",\"masterPublicKey\":\"19349903103956176070235423774157995896840157182198600174309409106416294821789\"}\n"
+        );
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn rejects_key_derivation_without_secret_source() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code =
+            run(["railguncli", "keys", "derive", "--show-secrets"], &mut stdout, &mut stderr);
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            "key derivation requires one of --mnemonic or --raw-seed\n"
+        );
+    }
+
+    #[test]
+    fn rejects_key_derivation_with_multiple_secret_sources() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            [
+                "railguncli",
+                "keys",
+                "derive",
+                "--mnemonic",
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+                "--raw-seed",
+                "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4",
+                "--show-secrets",
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            "key derivation requires exactly one of --mnemonic or --raw-seed\n"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_raw_seed_hex() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            ["railguncli", "keys", "derive", "--raw-seed", "xyz", "--show-secrets"],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            "invalid raw seed: expected lowercase or uppercase hex\n"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_raw_seed_length() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            ["railguncli", "keys", "derive", "--raw-seed", "00", "--show-secrets"],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.is_empty());
+        assert_eq!(String::from_utf8_lossy(&stderr), "invalid raw seed: expected 64 bytes\n");
     }
 
     #[test]
