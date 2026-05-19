@@ -3,6 +3,7 @@
 mod error;
 mod fee;
 mod transact;
+mod waku;
 
 pub use error::BroadcasterError;
 pub use fee::{
@@ -14,4 +15,10 @@ pub use transact::{
     BroadcasterRawParamsTransactCommon, BroadcasterRequestSharedParams,
     BroadcasterTransactRequestType, BroadcasterVersionRange, parse_transact_common_payload,
     serialize_transact_common_payload,
+};
+pub use waku::{
+    BroadcasterEncryptedData, BroadcasterTransactEnvelope, BroadcasterTransactResponse,
+    parse_transact_envelope_payload, parse_transact_response_payload,
+    serialize_fee_message_payload, serialize_transact_envelope_payload,
+    serialize_transact_response_payload,
 };

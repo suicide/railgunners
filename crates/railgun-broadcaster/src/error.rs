@@ -46,6 +46,16 @@ pub enum BroadcasterError {
     InvalidTransactCalldata,
     /// The transact payload POI bundle was malformed.
     InvalidTransactPoiBundle(&'static str),
+    /// The transact envelope JSON could not be parsed.
+    InvalidTransactEnvelopePayloadJson,
+    /// The transact envelope was malformed.
+    InvalidTransactEnvelopePayload(&'static str),
+    /// The transact envelope public key was malformed.
+    InvalidTransactEnvelopePubkey,
+    /// The transact response JSON could not be parsed.
+    InvalidTransactResponsePayloadJson,
+    /// The transact response was malformed.
+    InvalidTransactResponsePayload(&'static str),
 }
 
 impl core::fmt::Display for BroadcasterError {
@@ -57,7 +67,9 @@ impl core::fmt::Display for BroadcasterError {
             Self::InvalidFeeMessage(message)
             | Self::InvalidFeeMessageField(message)
             | Self::InvalidTransactPayload(message)
-            | Self::InvalidTransactPoiBundle(message) => formatter.write_str(message),
+            | Self::InvalidTransactPoiBundle(message)
+            | Self::InvalidTransactEnvelopePayload(message)
+            | Self::InvalidTransactResponsePayload(message) => formatter.write_str(message),
             Self::InvalidFeeMessageDataHex => {
                 formatter.write_str("broadcaster fee message data must be valid hex")
             }
@@ -97,6 +109,15 @@ impl core::fmt::Display for BroadcasterError {
             }
             Self::InvalidTransactCalldata => {
                 formatter.write_str("broadcaster transact data must be valid hex")
+            }
+            Self::InvalidTransactEnvelopePayloadJson => {
+                formatter.write_str("failed to parse broadcaster transact envelope JSON")
+            }
+            Self::InvalidTransactEnvelopePubkey => formatter.write_str(
+                "broadcaster transact envelope pubkey must be valid 32-byte hex blinded public key",
+            ),
+            Self::InvalidTransactResponsePayloadJson => {
+                formatter.write_str("failed to parse broadcaster transact response JSON")
             }
         }
     }
