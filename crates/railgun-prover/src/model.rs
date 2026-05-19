@@ -1,5 +1,8 @@
 //! Typed proof request and result models.
 
+use railgun_artifacts::StandardCircuitShape;
+use railgun_core::parse_canonical_field_bytes;
+use railgun_types::{BoundParamsHash, MerkleRoot, NoteCommitment, Nullifier};
 use serde_json::{Map, Value};
 
 use crate::ProverError;
@@ -68,20 +71,110 @@ impl PublicSignals {
 /// Typed public-input wrapper for Railgun transaction proof verification.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransactionPublicInputs {
-    signals: PublicSignals,
+    shape: StandardCircuitShape,
+    merkle_root: MerkleRoot,
+    bound_params_hash: BoundParamsHash,
+    nullifiers: Vec<Nullifier>,
+    commitments_out: Vec<NoteCommitment>,
 }
 
 impl TransactionPublicInputs {
     /// Creates typed Railgun transaction public inputs.
-    #[must_use]
-    pub fn new(signals: Vec<String>) -> Self {
-        Self { signals: PublicSignals::new(signals) }
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the provided nullifier or output counts do not
+    /// match the selected standard circuit shape.
+    pub fn new(
+        shape: StandardCircuitShape,
+        merkle_root: MerkleRoot,
+        bound_params_hash: BoundParamsHash,
+        nullifiers: Vec<Nullifier>,
+        commitments_out: Vec<NoteCommitment>,
+    ) -> Result<Self, ProverError> {
+        let expected_inputs = usize::from(shape.n_inputs());
+        let expected_outputs = usize::from(shape.n_outputs());
+
+        if nullifiers.len() != expected_inputs {
+            return Err(ProverError::InvalidPublicInputs(
+                "nullifier count must exactly match the selected circuit inputs",
+            ));
+        }
+        if commitments_out.len() != expected_outputs {
+            return Err(ProverError::InvalidPublicInputs(
+                "commitment count must exactly match the selected circuit outputs",
+            ));
+        }
+
+        Ok(Self { shape, merkle_root, bound_params_hash, nullifiers, commitments_out })
     }
 
-    /// Returns the ordered public signals.
+    /// Returns the selected standard circuit shape.
     #[must_use]
-    pub fn signals(&self) -> &PublicSignals {
-        &self.signals
+    pub const fn shape(&self) -> StandardCircuitShape {
+        self.shape
+    }
+
+    /// Returns the merkle root committed into the circuit.
+    #[must_use]
+    pub const fn merkle_root(&self) -> &MerkleRoot {
+        &self.merkle_root
+    }
+
+    /// Returns the bound-params hash committed into the circuit.
+    #[must_use]
+    pub const fn bound_params_hash(&self) -> &BoundParamsHash {
+        &self.bound_params_hash
+    }
+
+    /// Returns the ordered nullifiers.
+    #[must_use]
+    pub fn nullifiers(&self) -> &[Nullifier] {
+        &self.nullifiers
+    }
+
+    /// Returns the ordered commitments out.
+    #[must_use]
+    pub fn commitments_out(&self) -> &[NoteCommitment] {
+        &self.commitments_out
+    }
+
+    /// Serializes canonical public signals in exact circuit order.
+    ///
+    /// Ordering is exactly `merkleRoot`, `boundParamsHash`, `nullifiers`,
+    /// `commitmentsOut`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when byte-backed fields are not canonical BN254 scalar
+    /// encodings.
+    pub fn to_public_signals(&self) -> Result<PublicSignals, ProverError> {
+        let mut signals =
+            Vec::with_capacity(2 + self.nullifiers.len() + self.commitments_out.len());
+        signals.push(
+            parse_canonical_field_bytes(self.merkle_root.as_bytes())
+                .map_err(|_| {
+                    ProverError::InvalidPublicInputs(
+                        "merkle root must be canonical BN254 field bytes",
+                    )
+                })?
+                .to_str_radix(10),
+        );
+        signals.push(
+            parse_canonical_field_bytes(self.bound_params_hash.as_bytes())
+                .map_err(|_| {
+                    ProverError::InvalidPublicInputs(
+                        "bound params hash must be canonical BN254 field bytes",
+                    )
+                })?
+                .to_str_radix(10),
+        );
+        signals.extend(self.nullifiers.iter().map(|nullifier| nullifier.value().to_str_radix(10)));
+        signals.extend(
+            self.commitments_out.iter().map(|commitment| commitment.value().to_str_radix(10)),
+        );
+
+        Ok(PublicSignals::new(signals))
     }
 }
 

@@ -1958,7 +1958,10 @@ dependencies = [
 name = "railgun-prover"
 version = "0.1.0"
 dependencies = [
+ "num-bigint",
  "railgun-artifacts",
+ "railgun-core",
+ "railgun-types",
  "serde_json",
 ]
 

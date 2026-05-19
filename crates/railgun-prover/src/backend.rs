@@ -115,7 +115,7 @@ impl PublicInputAdapter for WasmProverBackend<'_> {
         &self,
         public_inputs: &TransactionPublicInputs,
     ) -> Result<PublicSignals, ProverError> {
-        Ok(public_inputs.signals().clone())
+        public_inputs.to_public_signals()
     }
 
     fn poi_public_signals(
@@ -200,7 +200,7 @@ impl PublicInputAdapter for NativeProverBackend<'_> {
         &self,
         public_inputs: &TransactionPublicInputs,
     ) -> Result<PublicSignals, ProverError> {
-        Ok(public_inputs.signals().clone())
+        public_inputs.to_public_signals()
     }
 
     fn poi_public_signals(

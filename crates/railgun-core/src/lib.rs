@@ -10,6 +10,7 @@ pub mod ciphertext_v3;
 pub mod commitment_ciphertext;
 mod crypto;
 pub mod event;
+pub mod field;
 pub mod hd;
 pub mod keys;
 pub mod merkle;
@@ -61,6 +62,7 @@ pub use event::{
     decode_v3_nullifier_event, decode_v3_transact_event, decode_v3_transaction_event,
     decode_v3_unshield_event,
 };
+pub use field::parse_canonical_field_bytes;
 pub use hd::{
     DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,
     derive_node_from_str, derive_spending_node, derive_viewing_node, spending_path, viewing_path,
