@@ -1918,6 +1918,7 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "hex",
+ "num-bigint",
  "railgun-core",
  "railgun-poi",
  "railgun-types",

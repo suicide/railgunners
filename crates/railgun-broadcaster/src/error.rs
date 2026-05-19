@@ -26,6 +26,26 @@ pub enum BroadcasterError {
     InvalidFeeMessageSignature,
     /// The fee message signature did not verify against the broadcaster identity.
     InvalidFeeMessageSignatureVerification,
+    /// The transact payload JSON could not be parsed.
+    InvalidTransactPayloadJson,
+    /// The parsed transact payload was missing required data.
+    InvalidTransactPayload(&'static str),
+    /// The transact payload requested an unsupported transact type.
+    UnsupportedTransactType(String),
+    /// The transact payload used an unsupported txid version.
+    UnsupportedTxidVersion(String),
+    /// The transact payload used an unsupported chain type.
+    UnsupportedChainType(u64),
+    /// The transact payload used an invalid chain id.
+    InvalidChainId,
+    /// The transact payload used an invalid broadcaster viewing key.
+    InvalidBroadcasterViewingKey,
+    /// The transact payload used an invalid destination address.
+    InvalidTransactToAddress,
+    /// The transact payload used malformed calldata.
+    InvalidTransactCalldata,
+    /// The transact payload POI bundle was malformed.
+    InvalidTransactPoiBundle(&'static str),
 }
 
 impl core::fmt::Display for BroadcasterError {
@@ -34,9 +54,10 @@ impl core::fmt::Display for BroadcasterError {
             Self::InvalidFeeMessagePayload => {
                 formatter.write_str("failed to parse broadcaster fee message payload JSON")
             }
-            Self::InvalidFeeMessage(message) | Self::InvalidFeeMessageField(message) => {
-                formatter.write_str(message)
-            }
+            Self::InvalidFeeMessage(message)
+            | Self::InvalidFeeMessageField(message)
+            | Self::InvalidTransactPayload(message)
+            | Self::InvalidTransactPoiBundle(message) => formatter.write_str(message),
             Self::InvalidFeeMessageDataHex => {
                 formatter.write_str("broadcaster fee message data must be valid hex")
             }
@@ -54,6 +75,28 @@ impl core::fmt::Display for BroadcasterError {
             }
             Self::InvalidFeeMessageSignatureVerification => {
                 formatter.write_str("broadcaster fee message signature verification failed")
+            }
+            Self::InvalidTransactPayloadJson => {
+                formatter.write_str("failed to parse broadcaster transact payload JSON")
+            }
+            Self::UnsupportedTransactType(transact_type) => {
+                write!(formatter, "unsupported broadcaster transact type: {transact_type}")
+            }
+            Self::UnsupportedTxidVersion(version) => {
+                write!(formatter, "unsupported broadcaster txid version: {version}")
+            }
+            Self::UnsupportedChainType(chain_type) => {
+                write!(formatter, "unsupported broadcaster chain type: {chain_type}")
+            }
+            Self::InvalidChainId => formatter.write_str("broadcaster chain id must be non-zero"),
+            Self::InvalidBroadcasterViewingKey => {
+                formatter.write_str("broadcaster viewing key must be valid 32-byte hex public key")
+            }
+            Self::InvalidTransactToAddress => {
+                formatter.write_str("broadcaster transact to address must be valid 20-byte hex")
+            }
+            Self::InvalidTransactCalldata => {
+                formatter.write_str("broadcaster transact data must be valid hex")
             }
         }
     }

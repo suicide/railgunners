@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 ed25519-dalek = "3.0.0-pre.7"
 hex = "0.4.3"
+num-bigint.workspace = true
 railgun-core.workspace = true
 railgun-poi.workspace = true
 railgun-types.workspace = true
