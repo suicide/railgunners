@@ -1955,6 +1955,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "railgun-poi"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "railgun-core",
+ "railgun-types",
+]
+
+[[package]]
 name = "railgun-prover"
 version = "0.1.0"
 dependencies = [

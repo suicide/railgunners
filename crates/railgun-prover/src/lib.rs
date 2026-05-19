@@ -14,9 +14,10 @@ pub use backend::{
 pub use error::ProverError;
 pub use executor::{NativeProverExecutor, WasmProverExecutor};
 pub use model::{
-    GeneratedProof, Groth16Proof, PoiPublicInputs, PreparedCircuitInputs, ProofFamily,
-    PublicSignals, TransactionPublicInputs,
+    GeneratedProof, PoiPublicInputs, PreparedCircuitInputs, ProofFamily, PublicSignals,
+    TransactionPublicInputs,
 };
+pub use railgun_types::Groth16Proof;
 pub use request::{PoiProofRequest, TransactionProofRequest};
 pub use select::{AvailableProverExecutors, BackendPreference, select_prover_backend};
 

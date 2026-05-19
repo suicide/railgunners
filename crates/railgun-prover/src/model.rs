@@ -2,7 +2,7 @@
 
 use railgun_artifacts::StandardCircuitShape;
 use railgun_core::parse_canonical_field_bytes;
-use railgun_types::{BoundParamsHash, MerkleRoot, NoteCommitment, Nullifier};
+use railgun_types::{BoundParamsHash, Groth16Proof, MerkleRoot, NoteCommitment, Nullifier};
 use serde_json::{Map, Value};
 
 use crate::ProverError;
@@ -195,40 +195,6 @@ impl PoiPublicInputs {
     #[must_use]
     pub fn signals(&self) -> &PublicSignals {
         &self.signals
-    }
-}
-
-/// Typed Groth16 proof data.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Groth16Proof {
-    a: [String; 2],
-    b: [[String; 2]; 2],
-    c: [String; 2],
-}
-
-impl Groth16Proof {
-    /// Creates a typed Groth16 proof from canonical point strings.
-    #[must_use]
-    pub fn new(pi_a: [String; 2], pi_b: [[String; 2]; 2], pi_c: [String; 2]) -> Self {
-        Self { a: pi_a, b: pi_b, c: pi_c }
-    }
-
-    /// Returns proof point `pi_a`.
-    #[must_use]
-    pub fn pi_a(&self) -> &[String; 2] {
-        &self.a
-    }
-
-    /// Returns proof point `pi_b`.
-    #[must_use]
-    pub fn pi_b(&self) -> &[[String; 2]; 2] {
-        &self.b
-    }
-
-    /// Returns proof point `pi_c`.
-    #[must_use]
-    pub fn pi_c(&self) -> &[String; 2] {
-        &self.c
     }
 }
 
