@@ -1913,6 +1913,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "railgun-broadcaster"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "hex",
+ "railgun-core",
+ "railgun-poi",
+ "railgun-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "railgun-cli"
 version = "0.1.0"
 dependencies = [

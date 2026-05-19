@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/railgun-artifacts",
+    "crates/railgun-broadcaster",
     "crates/railgun-poi",
     "crates/railgun-prover",
     "crates/railgun-types",
@@ -20,6 +21,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 railgun-artifacts = { path = "crates/railgun-artifacts" }
+railgun-broadcaster = { path = "crates/railgun-broadcaster" }
 railgun-poi = { path = "crates/railgun-poi" }
 railgun-prover = { path = "crates/railgun-prover" }
 railgun-types = { path = "crates/railgun-types" }

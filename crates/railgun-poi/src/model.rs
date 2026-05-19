@@ -11,7 +11,7 @@ use crate::PoiError;
 /// Canonical default required POI list key.
 ///
 /// Source basis:
-/// - https://github.com/Railgun-Community/shared-models/blob/dc3af7873305938f9f0771a24ad91f807f1b88e0/src/models/proof-of-innocence.ts#L205-L213
+/// - <https://github.com/Railgun-Community/shared-models/blob/dc3af7873305938f9f0771a24ad91f807f1b88e0/src/models/proof-of-innocence.ts#L205-L213>
 pub const DEFAULT_REQUIRED_POI_LIST_KEY: &str =
     "efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88";
 
