@@ -52,6 +52,10 @@ pub enum BroadcasterError {
     InvalidTransactEnvelopePayload(&'static str),
     /// The transact envelope public key was malformed.
     InvalidTransactEnvelopePubkey,
+    /// The broadcaster viewing key used for transact encryption was invalid.
+    InvalidBroadcasterEncryptionKey,
+    /// Broadcaster transact encryption failed unexpectedly.
+    TransactEncryptionFailed,
     /// The transact response JSON could not be parsed.
     InvalidTransactResponsePayloadJson,
     /// The transact response was malformed.
@@ -114,8 +118,13 @@ impl core::fmt::Display for BroadcasterError {
                 formatter.write_str("failed to parse broadcaster transact envelope JSON")
             }
             Self::InvalidTransactEnvelopePubkey => formatter.write_str(
-                "broadcaster transact envelope pubkey must be valid 32-byte hex blinded public key",
+                "broadcaster transact envelope pubkey must be valid 32-byte hex viewing public key",
             ),
+            Self::InvalidBroadcasterEncryptionKey => formatter
+                .write_str("broadcaster viewing key must decode to a valid ed25519 public key"),
+            Self::TransactEncryptionFailed => {
+                formatter.write_str("failed to encrypt broadcaster transact payload")
+            }
             Self::InvalidTransactResponsePayloadJson => {
                 formatter.write_str("failed to parse broadcaster transact response JSON")
             }

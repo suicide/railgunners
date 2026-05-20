@@ -1,4 +1,4 @@
-use railgun_types::{BlindedViewingPublicKey, TxHash};
+use railgun_types::{TxHash, ViewingPublicKey};
 use serde::{Deserialize, Serialize};
 
 use crate::{BroadcasterError, BroadcasterFeeMessage};
@@ -24,23 +24,20 @@ impl BroadcasterEncryptedData {
 /// Transport-neutral broadcaster transact envelope.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BroadcasterTransactEnvelope {
-    pubkey: BlindedViewingPublicKey,
+    pubkey: ViewingPublicKey,
     encrypted_data: BroadcasterEncryptedData,
 }
 
 impl BroadcasterTransactEnvelope {
     /// Creates a validated broadcaster transact envelope.
     #[must_use]
-    pub const fn new(
-        pubkey: BlindedViewingPublicKey,
-        encrypted_data: BroadcasterEncryptedData,
-    ) -> Self {
+    pub const fn new(pubkey: ViewingPublicKey, encrypted_data: BroadcasterEncryptedData) -> Self {
         Self { pubkey, encrypted_data }
     }
 
     /// Returns the blinded envelope public key.
     #[must_use]
-    pub const fn pubkey(&self) -> &BlindedViewingPublicKey {
+    pub const fn pubkey(&self) -> &ViewingPublicKey {
         &self.pubkey
     }
 
@@ -145,15 +142,15 @@ fn decode_hex_exact<const N: usize>(value: &str) -> Result<[u8; N], BroadcasterE
     })
 }
 
-fn parse_blinded_pubkey(value: &str) -> Result<BlindedViewingPublicKey, BroadcasterError> {
+fn parse_pubkey(value: &str) -> Result<ViewingPublicKey, BroadcasterError> {
     let trimmed = value.strip_prefix("0x").unwrap_or(value);
     let bytes =
         hex::decode(trimmed).map_err(|_| BroadcasterError::InvalidTransactEnvelopePubkey)?;
-    BlindedViewingPublicKey::from_slice(&bytes)
+    ViewingPublicKey::from_slice(&bytes)
         .map_err(|_| BroadcasterError::InvalidTransactEnvelopePubkey)
 }
 
-fn encode_blinded_pubkey(value: &BlindedViewingPublicKey) -> String {
+fn encode_pubkey(value: &ViewingPublicKey) -> String {
     format!("0x{}", hex::encode(value.as_bytes()))
 }
 
@@ -182,7 +179,7 @@ impl TryFrom<BroadcasterTransactEnvelopeWire> for BroadcasterTransactEnvelope {
         }
 
         Ok(Self::new(
-            parse_blinded_pubkey(&value.params.pubkey)?,
+            parse_pubkey(&value.params.pubkey)?,
             BroadcasterEncryptedData::new(value.params.encrypted_data),
         ))
     }
@@ -193,7 +190,7 @@ impl From<&BroadcasterTransactEnvelope> for BroadcasterTransactEnvelopeWire {
         Self {
             method: "transact".to_owned(),
             params: BroadcasterTransactEnvelopeParamsWire {
-                pubkey: encode_blinded_pubkey(value.pubkey()),
+                pubkey: encode_pubkey(value.pubkey()),
                 encrypted_data: value.encrypted_data().parts().clone(),
             },
         }
@@ -287,9 +284,7 @@ mod tests {
 
     use ed25519_dalek::{Signer, SigningKey};
     use railgun_core::{derive_viewing_public_key, encode_railgun_address};
-    use railgun_types::{
-        BlindedViewingPublicKey, ChainScope, MasterPublicKey, TxHash, ViewingPrivateKey,
-    };
+    use railgun_types::{ChainScope, MasterPublicKey, TxHash, ViewingPrivateKey, ViewingPublicKey};
     use serde::{Deserialize, Serialize};
 
     use super::{
@@ -379,7 +374,7 @@ mod tests {
     #[test]
     fn transact_envelope_round_trips_with_canonical_fields() {
         let payload = BroadcasterTransactEnvelope::new(
-            BlindedViewingPublicKey::new([9_u8; 32]),
+            ViewingPublicKey::new([9_u8; 32]),
             BroadcasterEncryptedData::new(["ciphertext".to_owned(), "ivtag".to_owned()]),
         );
         let serialized = serialize_transact_envelope_payload(&payload)

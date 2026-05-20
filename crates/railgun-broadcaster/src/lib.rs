@@ -1,10 +1,14 @@
 //! Optional broadcaster-facing models and validation helpers.
 
+mod encrypt;
 mod error;
 mod fee;
 mod transact;
 mod waku;
 
+pub use encrypt::{
+    encrypt_transact_common_payload, encrypt_transact_common_payload_with_ephemeral_key,
+};
 pub use error::BroadcasterError;
 pub use fee::{
     BroadcasterFeeMessage, BroadcasterFeeMessageData, parse_fee_message_data,
