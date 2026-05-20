@@ -361,6 +361,69 @@ pub struct PreTransactionPoisPerTxidLeafPerList(
     HashMap<PoiListKey, HashMap<TxidLeafHash, PreTransactionPoi>>,
 );
 
+/// One missing required pre-transaction POI entry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MissingPreTransactionPoiEntry {
+    list_key: PoiListKey,
+    txid_leaf_hash: TxidLeafHash,
+}
+
+impl MissingPreTransactionPoiEntry {
+    /// Creates one missing bundle-entry descriptor.
+    #[must_use]
+    pub const fn new(list_key: PoiListKey, txid_leaf_hash: TxidLeafHash) -> Self {
+        Self { list_key, txid_leaf_hash }
+    }
+
+    /// Returns the missing list key.
+    #[must_use]
+    pub const fn list_key(&self) -> &PoiListKey {
+        &self.list_key
+    }
+
+    /// Returns the missing txid leaf hash.
+    #[must_use]
+    pub const fn txid_leaf_hash(&self) -> &TxidLeafHash {
+        &self.txid_leaf_hash
+    }
+}
+
+/// Missing required pre-transaction POI bundle details.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct MissingPreTransactionPoiBundle {
+    missing_list_keys: Vec<PoiListKey>,
+    missing_entries: Vec<MissingPreTransactionPoiEntry>,
+}
+
+impl MissingPreTransactionPoiBundle {
+    /// Creates structured missing bundle details.
+    #[must_use]
+    pub fn new(
+        missing_list_keys: Vec<PoiListKey>,
+        missing_entries: Vec<MissingPreTransactionPoiEntry>,
+    ) -> Self {
+        Self { missing_list_keys, missing_entries }
+    }
+
+    /// Returns the required list keys that were entirely missing from the bundle.
+    #[must_use]
+    pub fn missing_list_keys(&self) -> &[PoiListKey] {
+        &self.missing_list_keys
+    }
+
+    /// Returns the required `(list_key, txid_leaf_hash)` entries that were missing.
+    #[must_use]
+    pub fn missing_entries(&self) -> &[MissingPreTransactionPoiEntry] {
+        &self.missing_entries
+    }
+
+    /// Returns whether the missing-detail bundle is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.missing_list_keys.is_empty() && self.missing_entries.is_empty()
+    }
+}
+
 impl PreTransactionPoisPerTxidLeafPerList {
     /// Creates the nested POI proof map from an existing typed structure.
     #[must_use]
@@ -376,6 +439,87 @@ impl PreTransactionPoisPerTxidLeafPerList {
         proof: PreTransactionPoi,
     ) {
         self.0.entry(list_key).or_default().insert(txid_leaf_hash, proof);
+    }
+
+    /// Returns all POI proofs stored for one list key.
+    #[must_use]
+    pub fn get_list(
+        &self,
+        list_key: &PoiListKey,
+    ) -> Option<&HashMap<TxidLeafHash, PreTransactionPoi>> {
+        self.0.get(list_key)
+    }
+
+    /// Returns one POI proof stored under the specified list key and txid leaf hash.
+    #[must_use]
+    pub fn get(
+        &self,
+        list_key: &PoiListKey,
+        txid_leaf_hash: &TxidLeafHash,
+    ) -> Option<&PreTransactionPoi> {
+        self.get_list(list_key).and_then(|txid_map| txid_map.get(txid_leaf_hash))
+    }
+
+    /// Returns whether the specified list key and txid leaf hash pair is present.
+    #[must_use]
+    pub fn contains(&self, list_key: &PoiListKey, txid_leaf_hash: &TxidLeafHash) -> bool {
+        self.get(list_key, txid_leaf_hash).is_some()
+    }
+
+    /// Validates that the bundle contains every required list key and txid leaf hash.
+    ///
+    /// Duplicate required list keys or txid leaf hashes in the caller input are treated as
+    /// harmless and only considered once, preserving first-seen reporting order.
+    ///
+    /// # Errors
+    ///
+    /// Returns structured missing-entry details when one or more required entries are absent.
+    pub fn validate_required_entries(
+        &self,
+        required_list_keys: &[PoiListKey],
+        txid_leaf_hashes: &[TxidLeafHash],
+    ) -> Result<(), PoiError> {
+        let mut seen_list_keys = Vec::new();
+        let mut unique_list_keys = Vec::new();
+        for &list_key in required_list_keys {
+            if !seen_list_keys.contains(&list_key) {
+                seen_list_keys.push(list_key);
+                unique_list_keys.push(list_key);
+            }
+        }
+
+        let mut seen_txid_leaf_hashes = Vec::new();
+        let mut unique_txid_leaf_hashes = Vec::new();
+        for &txid_leaf_hash in txid_leaf_hashes {
+            if !seen_txid_leaf_hashes.contains(&txid_leaf_hash) {
+                seen_txid_leaf_hashes.push(txid_leaf_hash);
+                unique_txid_leaf_hashes.push(txid_leaf_hash);
+            }
+        }
+
+        let mut missing_list_keys = Vec::new();
+        let mut missing_entries = Vec::new();
+
+        for list_key in unique_list_keys {
+            let Some(txid_map) = self.get_list(&list_key) else {
+                missing_list_keys.push(list_key);
+                continue;
+            };
+
+            for txid_leaf_hash in &unique_txid_leaf_hashes {
+                if !txid_map.contains_key(txid_leaf_hash) {
+                    missing_entries
+                        .push(MissingPreTransactionPoiEntry::new(list_key, *txid_leaf_hash));
+                }
+            }
+        }
+
+        let missing = MissingPreTransactionPoiBundle::new(missing_list_keys, missing_entries);
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(PoiError::MissingRequiredPreTransactionPois(Box::new(missing)))
+        }
     }
 
     /// Returns the nested POI proof map.
@@ -674,8 +818,9 @@ mod tests {
     use railgun_types::{BN254_SCALAR_FIELD_MODULUS_BYTES, Groth16Proof};
 
     use super::{
-        BlindedCommitment, DEFAULT_REQUIRED_POI_LIST_KEY, DEFAULT_REQUIRED_POI_LIST_NAME, PoiError,
-        PoiEventLengths, PoiEventType, PoiList, PoiListType, PoiStatus, PreTransactionPoi,
+        BlindedCommitment, DEFAULT_REQUIRED_POI_LIST_KEY, DEFAULT_REQUIRED_POI_LIST_NAME,
+        MissingPreTransactionPoiBundle, MissingPreTransactionPoiEntry, PoiError, PoiEventLengths,
+        PoiEventType, PoiList, PoiListType, PoiStatus, PreTransactionPoi,
         PreTransactionPoisPerTxidLeafPerList, TransactProofData, TxidLeafHash, TxidMerklerootIndex,
         default_required_poi_list, default_required_poi_list_key, is_required_poi_list_key,
         required_poi_lists,
@@ -845,6 +990,145 @@ mod tests {
             .get(&list_key)
             .unwrap_or_else(|| panic!("expected POI proofs for required list"));
         assert_eq!(by_list.get(&txid_leaf_hash), Some(&proof));
+    }
+
+    #[test]
+    fn pre_transaction_poi_bundle_lookup_succeeds() {
+        let list_key = default_required_poi_list_key();
+        let txid_leaf_hash =
+            TxidLeafHash::parse("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+                .unwrap_or_else(|error| panic!("expected txid leaf hash to parse: {error}"));
+        let proof =
+            PreTransactionPoi::new(proof(), root(1), vec![root(2)], vec![blinded(3)], txid(4))
+                .unwrap_or_else(|error| {
+                    panic!("expected pre-transaction POI to construct: {error}")
+                });
+
+        let mut pois = PreTransactionPoisPerTxidLeafPerList::default();
+        pois.insert(list_key, txid_leaf_hash, proof.clone());
+
+        assert_eq!(pois.get_list(&list_key).and_then(|map| map.get(&txid_leaf_hash)), Some(&proof));
+        assert_eq!(pois.get(&list_key, &txid_leaf_hash), Some(&proof));
+        assert!(pois.contains(&list_key, &txid_leaf_hash));
+    }
+
+    #[test]
+    fn required_entry_validation_accepts_complete_bundle() {
+        let list_key = default_required_poi_list_key();
+        let txid_leaf_hash =
+            TxidLeafHash::parse("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+                .unwrap_or_else(|error| panic!("expected txid leaf hash to parse: {error}"));
+        let proof =
+            PreTransactionPoi::new(proof(), root(1), vec![root(2)], vec![blinded(3)], txid(4))
+                .unwrap_or_else(|error| {
+                    panic!("expected pre-transaction POI to construct: {error}")
+                });
+
+        let mut pois = PreTransactionPoisPerTxidLeafPerList::default();
+        pois.insert(list_key, txid_leaf_hash, proof);
+
+        pois.validate_required_entries(&[list_key], &[txid_leaf_hash])
+            .unwrap_or_else(|error| panic!("complete bundle should validate: {error}"));
+    }
+
+    #[test]
+    fn required_entry_validation_reports_missing_required_list() {
+        let txid_leaf_hash =
+            TxidLeafHash::parse("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+                .unwrap_or_else(|error| panic!("expected txid leaf hash to parse: {error}"));
+        let pois = PreTransactionPoisPerTxidLeafPerList::default();
+
+        let Err(error) =
+            pois.validate_required_entries(&[default_required_poi_list_key()], &[txid_leaf_hash])
+        else {
+            panic!("missing required list should fail");
+        };
+
+        assert_eq!(
+            error,
+            PoiError::MissingRequiredPreTransactionPois(Box::new(
+                MissingPreTransactionPoiBundle::new(
+                    vec![default_required_poi_list_key()],
+                    Vec::new()
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn required_entry_validation_reports_missing_txid_leaf_entry() {
+        let list_key = default_required_poi_list_key();
+        let present_txid_leaf_hash =
+            TxidLeafHash::parse("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+                .unwrap_or_else(|error| panic!("expected txid leaf hash to parse: {error}"));
+        let missing_txid_leaf_hash =
+            TxidLeafHash::parse("111122223333444455556666777788889999aaaabbbbccccddddeeeeffff0000")
+                .unwrap_or_else(|error| panic!("expected txid leaf hash to parse: {error}"));
+        let proof =
+            PreTransactionPoi::new(proof(), root(1), vec![root(2)], vec![blinded(3)], txid(4))
+                .unwrap_or_else(|error| {
+                    panic!("expected pre-transaction POI to construct: {error}")
+                });
+
+        let mut pois = PreTransactionPoisPerTxidLeafPerList::default();
+        pois.insert(list_key, present_txid_leaf_hash, proof);
+
+        let Err(error) = pois.validate_required_entries(&[list_key], &[missing_txid_leaf_hash])
+        else {
+            panic!("missing txid leaf entry should fail");
+        };
+
+        assert_eq!(
+            error,
+            PoiError::MissingRequiredPreTransactionPois(Box::new(
+                MissingPreTransactionPoiBundle::new(
+                    Vec::new(),
+                    vec![MissingPreTransactionPoiEntry::new(list_key, missing_txid_leaf_hash)],
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn required_entry_validation_reports_mixed_missing_details_deterministically() {
+        let first_list_key = default_required_poi_list_key();
+        let second_list_key =
+            PoiListKey::parse("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .unwrap_or_else(|error| panic!("expected list key to parse: {error}"));
+        let present_txid_leaf_hash =
+            TxidLeafHash::parse("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+                .unwrap_or_else(|error| panic!("expected txid leaf hash to parse: {error}"));
+        let missing_txid_leaf_hash =
+            TxidLeafHash::parse("111122223333444455556666777788889999aaaabbbbccccddddeeeeffff0000")
+                .unwrap_or_else(|error| panic!("expected txid leaf hash to parse: {error}"));
+        let proof =
+            PreTransactionPoi::new(proof(), root(1), vec![root(2)], vec![blinded(3)], txid(4))
+                .unwrap_or_else(|error| {
+                    panic!("expected pre-transaction POI to construct: {error}")
+                });
+
+        let mut pois = PreTransactionPoisPerTxidLeafPerList::default();
+        pois.insert(first_list_key, present_txid_leaf_hash, proof);
+
+        let Err(error) = pois.validate_required_entries(
+            &[first_list_key, second_list_key, first_list_key],
+            &[missing_txid_leaf_hash, present_txid_leaf_hash, missing_txid_leaf_hash],
+        ) else {
+            panic!("mixed missing details should fail");
+        };
+
+        assert_eq!(
+            error,
+            PoiError::MissingRequiredPreTransactionPois(Box::new(
+                MissingPreTransactionPoiBundle::new(
+                    vec![second_list_key],
+                    vec![MissingPreTransactionPoiEntry::new(
+                        first_list_key,
+                        missing_txid_leaf_hash
+                    )],
+                )
+            ))
+        );
     }
 
     #[test]
