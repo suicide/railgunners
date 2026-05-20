@@ -1,11 +1,17 @@
 //! Optional typed POI models and validation helpers.
 
+mod client;
 mod error;
+#[cfg(feature = "http")]
+mod http;
 mod model;
 mod rpc;
 mod validation;
 
+pub use client::{PoiClient, PoiJsonRpcTransport};
 pub use error::PoiError;
+#[cfg(feature = "http")]
+pub use http::{PoiHttpTransport, PoiHttpTransportConfig};
 pub use model::{
     BlindedCommitment, DEFAULT_REQUIRED_POI_LIST_DESCRIPTION, DEFAULT_REQUIRED_POI_LIST_KEY,
     DEFAULT_REQUIRED_POI_LIST_NAME, MissingPreTransactionPoiBundle, MissingPreTransactionPoiEntry,

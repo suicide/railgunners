@@ -94,6 +94,19 @@ Likely future candidates include wallet, chain, storage, broadcaster, and Proof 
 
 The exact split can evolve, but each crate must have a narrow purpose and should be added because it improves ownership boundaries rather than because it seems theoretically useful.
 
+#### Proof Of Innocence Transport Boundary
+
+`railgun-poi` owns typed POI request and response models plus pure validation helpers.
+Concrete POI networking should stay optional and sit behind a transport boundary rather than becoming the only public access path.
+
+That means:
+
+- typed JSON-RPC payload construction and parsing remain transport-agnostic
+- default HTTP clients should be feature-gated and replaceable
+- callers should be able to provide their own transport implementations, including future async or runtime-specific clients
+
+This keeps POI modeling reusable across native Rust, WASM-oriented bindings, test harnesses, and future async adapters without duplicating protocol behavior.
+
 ### Adapter Crates
 
 Adapters implement concrete integrations without polluting core APIs.

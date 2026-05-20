@@ -1981,6 +1981,7 @@ dependencies = [
  "railgun-types",
  "serde",
  "serde_json",
+ "ureq",
 ]
 
 [[package]]

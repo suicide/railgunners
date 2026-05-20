@@ -42,6 +42,21 @@ pub enum PoiError {
     InvalidPoiStatus(&'static str),
     /// Parsed POI request/response context did not match the caller expectation.
     PoiValidationContextMismatch(&'static str),
+    /// A configured POI transport endpoint URL was invalid.
+    InvalidPoiTransportEndpoint(String),
+    /// The POI transport failed before receiving a response.
+    PoiTransportFailed(String),
+    /// The POI transport timed out.
+    PoiTransportTimeout,
+    /// The POI transport returned an unexpected HTTP status code.
+    PoiTransportUnexpectedHttpStatus(u16),
+    /// The POI transport exhausted its retry budget.
+    PoiTransportRetryExhausted {
+        /// The number of attempted requests, including the first attempt.
+        attempts: u32,
+        /// The final retryable transport error that exhausted the budget.
+        last_error: Box<PoiError>,
+    },
 }
 
 impl core::fmt::Display for PoiError {
@@ -76,6 +91,19 @@ impl core::fmt::Display for PoiError {
             }
             Self::PoiJsonRpcRemoteError { code, message } => {
                 write!(formatter, "POI JSON-RPC remote error {code}: {message}")
+            }
+            Self::InvalidPoiTransportEndpoint(endpoint) => {
+                write!(formatter, "invalid POI transport endpoint: {endpoint}")
+            }
+            Self::PoiTransportFailed(message) => {
+                write!(formatter, "POI transport failed: {message}")
+            }
+            Self::PoiTransportTimeout => formatter.write_str("POI transport timed out"),
+            Self::PoiTransportUnexpectedHttpStatus(status) => {
+                write!(formatter, "POI transport returned unexpected HTTP status: {status}")
+            }
+            Self::PoiTransportRetryExhausted { attempts, last_error } => {
+                write!(formatter, "POI transport exhausted {attempts} attempts: {last_error}")
             }
         }
     }

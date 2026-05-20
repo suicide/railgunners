@@ -10,6 +10,10 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+http = ["dep:ureq"]
+
 [dependencies]
 hex = "0.4.3"
 num-bigint.workspace = true
@@ -17,3 +21,4 @@ railgun-core.workspace = true
 railgun-types.workspace = true
 serde.workspace = true
 serde_json = "1.0.145"
+ureq = { version = "3.3.0", optional = true }

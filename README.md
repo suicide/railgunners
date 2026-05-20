@@ -28,6 +28,10 @@ Additional crates and adapters will be added when real feature work requires the
 
 The current workspace includes:
 
+- `crates/railgun-artifacts` for proving-artifact metadata and optional downloads
+- `crates/railgun-broadcaster` for typed broadcaster-facing models and helpers
+- `crates/railgun-poi` for typed Proof of Innocence models, validation, and optional transports
+- `crates/railgun-prover` for proving-oriented abstractions and helpers
 - `crates/railgun-types` for shared domain primitives
 - `crates/railgun-core` for shared protocol traits and errors
 - `crates/railgun-wasm` for thin WASM-oriented bindings
