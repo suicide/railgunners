@@ -1975,9 +1975,12 @@ dependencies = [
 name = "railgun-poi"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "num-bigint",
  "railgun-core",
  "railgun-types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

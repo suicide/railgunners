@@ -2,6 +2,7 @@
 
 mod error;
 mod model;
+mod rpc;
 
 pub use error::PoiError;
 pub use model::{
@@ -10,4 +11,16 @@ pub use model::{
     PoiListStatus, PoiListType, PoiStatus, PreTransactionPoi, PreTransactionPoisPerTxidLeafPerList,
     TransactProofData, TxidLeafHash, TxidMerklerootIndex, default_required_poi_list,
     default_required_poi_list_key, is_required_poi_list_key, required_poi_lists,
+};
+pub use rpc::{
+    PoiChainParams, PoiEventsParams, PoiHealthResponse, PoiJsonRpcMethod, PoiJsonRpcRequest,
+    PoiMerkleProof, PoiMerkleProofsParams, PoiMerkletreeLeavesParams, PoiNodeStatusForNetwork,
+    PoiNodeStatusResponse, PoiShieldQueueStatus, PoiSubmitTransactProofParams, PoiSyncedListEvent,
+    PoiTransactProofsParams, PoiTxidStatus, PoiValidatePoiMerklerootsParams,
+    PoiValidateTxidMerklerootParams, PoiValidatedTxidStatus, parse_poi_events_response_payload,
+    parse_poi_health_response_payload, parse_poi_merkle_proofs_response_payload,
+    parse_poi_merkletree_leaves_response_payload, parse_poi_node_status_response_payload,
+    parse_poi_submit_transact_proof_response_payload, parse_poi_transact_proofs_response_payload,
+    parse_poi_validated_txid_response_payload, parse_poi_validation_response_payload,
+    serialize_poi_json_rpc_request,
 };
