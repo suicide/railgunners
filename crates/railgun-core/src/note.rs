@@ -60,6 +60,11 @@ impl From<BlindingError> for NoteReconstructionError {
 }
 
 /// Resolves sender visibility from the optional sender-random field.
+///
+/// This is the low-level encoded-MPK rule used by note plaintexts: missing
+/// sender-random and the all-zero sentinel both mean visible-sender mode.
+/// Higher-level V2 received-note reconstruction still needs an ambiguity guard
+/// because V2 plaintext does not carry `sender_random` directly.
 #[must_use]
 pub fn sender_visibility(sender_random: Option<&SenderRandom>) -> SenderVisibility {
     match sender_random {
@@ -104,6 +109,11 @@ pub fn encode_master_public_key(
 ///
 /// Hidden-sender notes carry the receiver MPK directly. Visible-sender notes XOR
 /// the current wallet MPK with the encoded MPK to recover the counterparty key.
+/// Missing sender-random is treated the same as the visible-sender null sentinel.
+///
+/// Callers reconstructing whole notes should prefer `reconstruct_v2_note` or
+/// `reconstruct_v3_note`, because V2 received notes can remain ambiguous even
+/// when this low-level decode rule resolves to visible mode.
 ///
 /// # Errors
 ///
@@ -134,6 +144,11 @@ pub fn decode_master_public_key(
 /// Hidden-sender notes carry the receiver MPK directly, so recovery must not infer
 /// a sender from `encoded_master_public_key`. Visible-sender notes XOR the fixed-
 /// width receiver and sender MPK encodings, so recovery reverses that XOR.
+/// Missing sender-random is treated the same as the visible-sender null sentinel.
+///
+/// This function only applies the encoded-MPK visibility rule. Callers
+/// reconstructing V2 received notes should prefer `reconstruct_v2_note`, which
+/// preserves the upstream ambiguity rule when plaintext omits `sender_random`.
 ///
 /// # Errors
 ///
@@ -1359,6 +1374,59 @@ mod tests {
         assert_eq!(reconstructed.note().sender(), Some(&sender));
         assert_eq!(reconstructed.note().sender_random(), None);
         assert_eq!(reconstructed.note().memo(), b"visible-v2");
+        assert_eq!(reconstructed.note().commitment(), &expected_commitment);
+    }
+
+    #[test]
+    fn v2_received_note_does_not_invent_sender_when_encoded_mpk_equals_receiver() {
+        let sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let random = NoteRandom::new(decode_hex("85b08a7cd73ee433072f1d410aeb4801"));
+        let sender_random = SenderRandom::null_sentinel();
+        let token_hash = TokenHash::new(decode_hex(
+            "0000000000000000000000007f4925cdf66ddf5b88016df1fe915e68eff8f192",
+        ));
+        let value = NoteValue::new(0x086a_a1ad_e61c_cb53);
+        let plaintext = V2Plaintext::new(
+            receiver.master_public_key().clone(),
+            token_hash,
+            random,
+            value,
+            b"ambiguous-v2".to_vec(),
+        );
+        let (blinded_sender_viewing_key, blinded_receiver_viewing_key) =
+            compute_blinded_keys(&sender, &receiver, &random, &sender_random);
+        let expected_commitment = derive_note_commitment(
+            &derive_note_public_key(receiver.master_public_key(), &random)
+                .unwrap_or_else(|error| panic!("note public key should derive: {error}")),
+            &token_hash,
+            value,
+        )
+        .unwrap_or_else(|error| panic!("commitment should derive: {error}"));
+
+        let reconstructed = reconstruct_v2_note(
+            &plaintext,
+            &receiver,
+            &blinded_sender_viewing_key,
+            &blinded_receiver_viewing_key,
+            NotePerspective::Received,
+            None,
+            &expected_commitment,
+        )
+        .unwrap_or_else(|error| {
+            panic!("ambiguous v2 received reconstruction should succeed: {error}")
+        });
+
+        assert_eq!(reconstructed.note().receiver(), &receiver);
+        assert_eq!(reconstructed.note().sender(), None);
+        assert_eq!(reconstructed.note().sender_random(), None);
+        assert_eq!(reconstructed.note().memo(), b"ambiguous-v2");
         assert_eq!(reconstructed.note().commitment(), &expected_commitment);
     }
 

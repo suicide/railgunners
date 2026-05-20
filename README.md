@@ -24,6 +24,12 @@ At the moment it provides:
 
 Additional crates and adapters will be added when real feature work requires them.
 
+Current note-modeling behavior includes sender-visibility rules used during note reconstruction:
+
+- hidden sender: a present non-null 15-byte `senderRandom` means `encodedMPK` carries the receiver MPK directly
+- visible sender: missing or all-zero-sentinel `senderRandom` means `encodedMPK = receiverMPK XOR senderMPK`
+- low-level sender recovery treats missing `senderRandom` as visible mode, but V2 received-note reconstruction preserves the upstream ambiguity rule when plaintext omits `senderRandom` and `encodedMPK == receiverMPK`
+
 ## Workspace
 
 The current workspace includes:
