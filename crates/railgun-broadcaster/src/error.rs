@@ -102,8 +102,9 @@ impl core::fmt::Display for BroadcasterError {
             Self::InvalidTransactPayloadJson => {
                 formatter.write_str("failed to parse broadcaster transact payload JSON")
             }
-            Self::InvalidTransactPayloadUtf8 => formatter
-                .write_str("broadcaster transact payload must decrypt to valid UTF-8 JSON"),
+            Self::InvalidTransactPayloadUtf8 => {
+                formatter.write_str("broadcaster transact payload must decrypt to valid UTF-8 JSON")
+            }
             Self::UnsupportedTransactType(transact_type) => {
                 write!(formatter, "unsupported broadcaster transact type: {transact_type}")
             }

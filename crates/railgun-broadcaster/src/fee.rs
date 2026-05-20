@@ -207,9 +207,7 @@ fn validate_fee_message_data_fields(
         return Err(BroadcasterError::InvalidFeeMessageField("feesID must not be empty"));
     }
     if railgun_address.as_str().is_empty() {
-        return Err(BroadcasterError::InvalidFeeMessageField(
-            "railgunAddress must not be empty",
-        ));
+        return Err(BroadcasterError::InvalidFeeMessageField("railgunAddress must not be empty"));
     }
     if version.is_empty() {
         return Err(BroadcasterError::InvalidFeeMessageField("version must not be empty"));
@@ -363,7 +361,8 @@ pub fn sign_fee_message(
     viewing_private_key: &ViewingPrivateKey,
 ) -> Result<BroadcasterFeeMessage, BroadcasterError> {
     let encoded_data = serialize_fee_message_data(data)?;
-    let signature = SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
+    let signature =
+        SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
 
     Ok(BroadcasterFeeMessage::new(
         data.clone(),
@@ -468,8 +467,10 @@ mod tests {
             version: "0.1.0".to_owned(),
             relay_adapt: "0x1111111111111111111111111111111111111111".to_owned(),
             required_poi_list_keys: vec![
-                PoiListKey::parse("efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88")
-                    .unwrap_or_else(|error| panic!("test list key should parse: {error}")),
+                PoiListKey::parse(
+                    "efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88",
+                )
+                .unwrap_or_else(|error| panic!("test list key should parse: {error}")),
             ],
             reliability: 0.92,
         })
@@ -481,7 +482,8 @@ mod tests {
         let data = sample_fee_message_data();
         let encoded_data = serialize_fee_message_data(&data)
             .unwrap_or_else(|error| panic!("test fee data should serialize: {error}"));
-        let signature = SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
+        let signature =
+            SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
 
         serde_json::json!({
             "data": encoded_data,

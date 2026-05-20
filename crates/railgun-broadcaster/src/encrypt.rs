@@ -60,9 +60,7 @@ fn decode_edwards_point(
     public_key: &ViewingPublicKey,
     error: BroadcasterError,
 ) -> Result<curve25519_dalek::edwards::EdwardsPoint, BroadcasterError> {
-    CompressedEdwardsY(*public_key.as_bytes())
-        .decompress()
-        .ok_or(error)
+    CompressedEdwardsY(*public_key.as_bytes()).decompress().ok_or(error)
 }
 
 fn derive_transact_shared_key_from_point(
@@ -76,7 +74,8 @@ fn derive_transact_shared_key_for_encryption(
     private_key: &ViewingPrivateKey,
     public_key: &ViewingPublicKey,
 ) -> Result<[u8; 32], BroadcasterError> {
-    let point = decode_edwards_point(public_key, BroadcasterError::InvalidBroadcasterEncryptionKey)?;
+    let point =
+        decode_edwards_point(public_key, BroadcasterError::InvalidBroadcasterEncryptionKey)?;
     Ok(derive_transact_shared_key_from_point(private_key, &point))
 }
 
@@ -255,9 +254,8 @@ mod tests {
 
     use super::{
         IV_LENGTH, TAG_LENGTH, decrypt_transact_common_envelope,
-        derive_transact_shared_key_for_decryption, ed25519_private_scalar,
-        encrypt_json_payload, encrypt_transact_common_payload,
-        encrypt_transact_common_payload_with_ephemeral_key,
+        derive_transact_shared_key_for_decryption, ed25519_private_scalar, encrypt_json_payload,
+        encrypt_transact_common_payload, encrypt_transact_common_payload_with_ephemeral_key,
         encrypt_transact_common_payload_with_ephemeral_key_and_iv,
     };
     use crate::{
@@ -321,9 +319,11 @@ mod tests {
         encrypted_data: &BroadcasterEncryptedData,
         client_pubkey: &ViewingPublicKey,
     ) -> String {
-        let shared_key =
-            derive_transact_shared_key_for_decryption(broadcaster_viewing_private_key, client_pubkey)
-                .unwrap_or_else(|error| panic!("shared key should derive: {error}"));
+        let shared_key = derive_transact_shared_key_for_decryption(
+            broadcaster_viewing_private_key,
+            client_pubkey,
+        )
+        .unwrap_or_else(|error| panic!("shared key should derive: {error}"));
         let parts = encrypted_data.parts();
         let iv_tag = parts[0].strip_prefix("0x").unwrap_or(&parts[0]);
         let ciphertext = parts[1].strip_prefix("0x").unwrap_or(&parts[1]);
@@ -378,12 +378,16 @@ mod tests {
             0x86, 0x91, 0x97, 0xff, 0xc8, 0x94, 0xb5, 0x8d, 0xbf, 0x4d, 0x0e, 0x95, 0x3c, 0x48,
             0x4d, 0x66, 0xcb, 0x5e,
         ]);
-        let sender_shared =
-            derive_transact_shared_key_for_decryption(&sender, &derive_viewing_public_key(&receiver))
-                .unwrap_or_else(|error| panic!("sender shared key should derive: {error}"));
-        let receiver_shared =
-            derive_transact_shared_key_for_decryption(&receiver, &derive_viewing_public_key(&sender))
-                .unwrap_or_else(|error| panic!("receiver shared key should derive: {error}"));
+        let sender_shared = derive_transact_shared_key_for_decryption(
+            &sender,
+            &derive_viewing_public_key(&receiver),
+        )
+        .unwrap_or_else(|error| panic!("sender shared key should derive: {error}"));
+        let receiver_shared = derive_transact_shared_key_for_decryption(
+            &receiver,
+            &derive_viewing_public_key(&sender),
+        )
+        .unwrap_or_else(|error| panic!("receiver shared key should derive: {error}"));
 
         assert_eq!(sender_shared, receiver_shared);
     }
@@ -509,7 +513,8 @@ mod tests {
             ]),
         );
 
-        let Err(error) = decrypt_transact_common_envelope(&ViewingPrivateKey::new([7_u8; 32]), &envelope)
+        let Err(error) =
+            decrypt_transact_common_envelope(&ViewingPrivateKey::new([7_u8; 32]), &envelope)
         else {
             panic!("invalid envelope pubkey should fail");
         };
@@ -524,7 +529,8 @@ mod tests {
             BroadcasterEncryptedData::new(["0x1234".to_owned(), "0x00".to_owned()]),
         );
 
-        let Err(error) = decrypt_transact_common_envelope(&ViewingPrivateKey::new([7_u8; 32]), &envelope)
+        let Err(error) =
+            decrypt_transact_common_envelope(&ViewingPrivateKey::new([7_u8; 32]), &envelope)
         else {
             panic!("invalid encrypted tuple should fail");
         };
@@ -549,7 +555,8 @@ mod tests {
         )
         .unwrap_or_else(|error| panic!("payload should encrypt: {error}"));
 
-        let Err(error) = decrypt_transact_common_envelope(&ViewingPrivateKey::new([8_u8; 32]), &envelope)
+        let Err(error) =
+            decrypt_transact_common_envelope(&ViewingPrivateKey::new([8_u8; 32]), &envelope)
         else {
             panic!("wrong private key should fail");
         };
@@ -574,12 +581,9 @@ mod tests {
             &ViewingPublicKey::new(*envelope.pubkey().as_bytes()),
         )
         .unwrap_or_else(|error| panic!("shared key should derive: {error}"));
-        let encrypted_data = encrypt_json_payload(
-            malformed_plaintext.as_bytes(),
-            &shared_key,
-            [12_u8; IV_LENGTH],
-        )
-        .unwrap_or_else(|error| panic!("malformed payload should encrypt: {error}"));
+        let encrypted_data =
+            encrypt_json_payload(malformed_plaintext.as_bytes(), &shared_key, [12_u8; IV_LENGTH])
+                .unwrap_or_else(|error| panic!("malformed payload should encrypt: {error}"));
         let malformed_envelope = BroadcasterTransactEnvelope::new(
             ViewingPublicKey::new(*envelope.pubkey().as_bytes()),
             encrypted_data,
