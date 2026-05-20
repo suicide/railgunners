@@ -3,6 +3,7 @@
 mod error;
 mod model;
 mod rpc;
+mod validation;
 
 pub use error::PoiError;
 pub use model::{
@@ -23,4 +24,8 @@ pub use rpc::{
     parse_poi_submit_transact_proof_response_payload, parse_poi_transact_proofs_response_payload,
     parse_poi_validated_txid_response_payload, parse_poi_validation_response_payload,
     serialize_poi_json_rpc_request,
+};
+pub use validation::{
+    check_txid_status, check_validated_txid_status, validate_poi_merkleroots_result,
+    validate_txid_merkleroot_result,
 };

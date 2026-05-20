@@ -34,6 +34,10 @@ pub enum PoiError {
         /// Remote JSON-RPC error message.
         message: String,
     },
+    /// A parsed POI status payload was internally inconsistent.
+    InvalidPoiStatus(&'static str),
+    /// Parsed POI request/response context did not match the caller expectation.
+    PoiValidationContextMismatch(&'static str),
 }
 
 impl core::fmt::Display for PoiError {
@@ -53,7 +57,9 @@ impl core::fmt::Display for PoiError {
             | Self::InvalidPoiPayload(message)
             | Self::InvalidHexEncoding(message)
             | Self::InvalidFieldEncoding(message)
+            | Self::InvalidPoiStatus(message)
             | Self::InvalidPoiJsonRpcRequest(message)
+            | Self::PoiValidationContextMismatch(message)
             | Self::InvalidPoiJsonRpcResponse(message) => formatter.write_str(message),
             Self::InvalidPoiJsonRpcRequestJson => {
                 formatter.write_str("failed to parse or serialize POI JSON-RPC request JSON")
