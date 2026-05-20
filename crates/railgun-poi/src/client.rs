@@ -67,10 +67,10 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
 
     fn request_and_parse<R>(
         &self,
-        request: PoiJsonRpcRequest,
+        request: &PoiJsonRpcRequest,
         parser: impl FnOnce(&str) -> Result<R, PoiError>,
     ) -> Result<R, PoiError> {
-        let response_body = self.execute_request(&request)?;
+        let response_body = self.execute_request(request)?;
         parser(&response_body)
     }
 
@@ -81,7 +81,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
     /// Returns an error if the transport fails or the response payload is invalid.
     pub fn health(&self) -> Result<PoiHealthResponse, PoiError> {
         self.request_and_parse(
-            PoiJsonRpcRequest::Health { id: self.allocate_request_id() },
+            &PoiJsonRpcRequest::Health { id: self.allocate_request_id() },
             parse_poi_health_response_payload,
         )
     }
@@ -94,7 +94,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
     /// txid status payload is internally inconsistent.
     pub fn node_status(&self) -> Result<PoiNodeStatusResponse, PoiError> {
         let response = self.request_and_parse(
-            PoiJsonRpcRequest::NodeStatus { id: self.allocate_request_id() },
+            &PoiJsonRpcRequest::NodeStatus { id: self.allocate_request_id() },
             parse_poi_node_status_response_payload,
         )?;
         for status in response.for_network().values() {
@@ -113,7 +113,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
         params: &PoiEventsParams,
     ) -> Result<Vec<PoiSyncedListEvent>, PoiError> {
         self.request_and_parse(
-            PoiJsonRpcRequest::PoiEvents {
+            &PoiJsonRpcRequest::PoiEvents {
                 id: self.allocate_request_id(),
                 params: Box::new(params.clone()),
             },
@@ -131,7 +131,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
         params: &PoiMerkletreeLeavesParams,
     ) -> Result<Vec<MerkleRoot>, PoiError> {
         self.request_and_parse(
-            PoiJsonRpcRequest::PoiMerkletreeLeaves {
+            &PoiJsonRpcRequest::PoiMerkletreeLeaves {
                 id: self.allocate_request_id(),
                 params: Box::new(params.clone()),
             },
@@ -149,7 +149,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
         params: &PoiTransactProofsParams,
     ) -> Result<Vec<TransactProofData>, PoiError> {
         self.request_and_parse(
-            PoiJsonRpcRequest::TransactProofs {
+            &PoiJsonRpcRequest::TransactProofs {
                 id: self.allocate_request_id(),
                 params: Box::new(params.clone()),
             },
@@ -167,7 +167,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
         params: &PoiMerkleProofsParams,
     ) -> Result<Vec<PoiMerkleProof>, PoiError> {
         self.request_and_parse(
-            PoiJsonRpcRequest::MerkleProofs {
+            &PoiJsonRpcRequest::MerkleProofs {
                 id: self.allocate_request_id(),
                 params: Box::new(params.clone()),
             },
@@ -186,7 +186,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
         params: PoiChainParams,
     ) -> Result<PoiValidatedTxidStatus, PoiError> {
         let response = self.request_and_parse(
-            PoiJsonRpcRequest::ValidatedTxid { id: self.allocate_request_id(), params },
+            &PoiJsonRpcRequest::ValidatedTxid { id: self.allocate_request_id(), params },
             parse_poi_validated_txid_response_payload,
         )?;
         check_validated_txid_status(&response)?;
@@ -205,7 +205,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
         params: &PoiValidateTxidMerklerootParams,
     ) -> Result<bool, PoiError> {
         let response = self.request_and_parse(
-            PoiJsonRpcRequest::ValidateTxidMerkleroot {
+            &PoiJsonRpcRequest::ValidateTxidMerkleroot {
                 id: self.allocate_request_id(),
                 params: Box::new(params.clone()),
             },
@@ -228,7 +228,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
         params: &PoiValidatePoiMerklerootsParams,
     ) -> Result<bool, PoiError> {
         let response = self.request_and_parse(
-            PoiJsonRpcRequest::ValidatePoiMerkleroots {
+            &PoiJsonRpcRequest::ValidatePoiMerkleroots {
                 id: self.allocate_request_id(),
                 params: Box::new(params.clone()),
             },
@@ -253,7 +253,7 @@ impl<T: PoiJsonRpcTransport> PoiClient<T> {
         params: &PoiSubmitTransactProofParams,
     ) -> Result<(), PoiError> {
         self.request_and_parse(
-            PoiJsonRpcRequest::SubmitTransactProof {
+            &PoiJsonRpcRequest::SubmitTransactProof {
                 id: self.allocate_request_id(),
                 params: Box::new(params.clone()),
             },
@@ -283,7 +283,7 @@ mod tests {
         }
 
         fn requests(&self) -> Vec<String> {
-            self.requests.lock().unwrap_or_else(|error| error.into_inner()).clone()
+            self.requests.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
         }
     }
 
@@ -291,7 +291,7 @@ mod tests {
         fn execute(&self, request_body: &str) -> Result<String, PoiError> {
             self.requests
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(request_body.to_owned());
             Ok(self.response.clone())
         }
