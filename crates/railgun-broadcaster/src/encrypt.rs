@@ -10,25 +10,114 @@ use railgun_types::{ViewingPrivateKey, ViewingPublicKey};
 
 use crate::{
     BroadcasterEncryptedData, BroadcasterError, BroadcasterRawParamsTransactCommon,
-    BroadcasterTransactEnvelope, serialize_transact_common_payload,
+    BroadcasterTransactEnvelope, parse_transact_common_payload, serialize_transact_common_payload,
 };
 
 type Aes256Gcm16 = AesGcm<Aes256, aes_gcm::aead::consts::U16>;
 
 const IV_LENGTH: usize = 16;
+const TAG_LENGTH: usize = 16;
+const IV_TAG_LENGTH: usize = IV_LENGTH + TAG_LENGTH;
+
+struct DecodedEncryptedData {
+    iv: [u8; IV_LENGTH],
+    tag: [u8; TAG_LENGTH],
+    ciphertext: Vec<u8>,
+}
+
+/// Decrypted broadcaster transact payload and parsed COMMON request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BroadcasterDecryptedTransactCommon {
+    plaintext: String,
+    payload: BroadcasterRawParamsTransactCommon,
+}
+
+impl BroadcasterDecryptedTransactCommon {
+    /// Creates a decrypted broadcaster transact payload result.
+    #[must_use]
+    pub fn new(plaintext: String, payload: BroadcasterRawParamsTransactCommon) -> Self {
+        Self { plaintext, payload }
+    }
+
+    /// Returns the decrypted canonical transact JSON payload.
+    #[must_use]
+    pub fn plaintext(&self) -> &str {
+        &self.plaintext
+    }
+
+    /// Returns the parsed typed transact payload.
+    #[must_use]
+    pub const fn payload(&self) -> &BroadcasterRawParamsTransactCommon {
+        &self.payload
+    }
+}
 
 fn ed25519_private_scalar(viewing_private_key: &ViewingPrivateKey) -> Scalar {
     SigningKey::from_bytes(viewing_private_key.as_bytes()).to_scalar()
 }
 
-fn derive_transact_shared_key(
+fn decode_edwards_point(
+    public_key: &ViewingPublicKey,
+    error: BroadcasterError,
+) -> Result<curve25519_dalek::edwards::EdwardsPoint, BroadcasterError> {
+    CompressedEdwardsY(*public_key.as_bytes())
+        .decompress()
+        .ok_or(error)
+}
+
+fn derive_transact_shared_key_from_point(
+    private_key: &ViewingPrivateKey,
+    point: &curve25519_dalek::edwards::EdwardsPoint,
+) -> [u8; 32] {
+    (point * ed25519_private_scalar(private_key)).compress().to_bytes()
+}
+
+fn derive_transact_shared_key_for_encryption(
     private_key: &ViewingPrivateKey,
     public_key: &ViewingPublicKey,
 ) -> Result<[u8; 32], BroadcasterError> {
-    let point = CompressedEdwardsY(*public_key.as_bytes())
-        .decompress()
-        .ok_or(BroadcasterError::InvalidBroadcasterEncryptionKey)?;
-    Ok((point * ed25519_private_scalar(private_key)).compress().to_bytes())
+    let point = decode_edwards_point(public_key, BroadcasterError::InvalidBroadcasterEncryptionKey)?;
+    Ok(derive_transact_shared_key_from_point(private_key, &point))
+}
+
+fn derive_transact_shared_key_for_decryption(
+    private_key: &ViewingPrivateKey,
+    public_key: &ViewingPublicKey,
+) -> Result<[u8; 32], BroadcasterError> {
+    let point = decode_edwards_point(public_key, BroadcasterError::InvalidTransactEnvelopePubkey)?;
+    Ok(derive_transact_shared_key_from_point(private_key, &point))
+}
+
+fn decode_encrypted_data(
+    encrypted_data: &BroadcasterEncryptedData,
+) -> Result<DecodedEncryptedData, BroadcasterError> {
+    let parts = encrypted_data.parts();
+    let iv_tag = parts[0].strip_prefix("0x").unwrap_or(&parts[0]);
+    let ciphertext = parts[1].strip_prefix("0x").unwrap_or(&parts[1]);
+
+    let iv_tag_bytes = hex::decode(iv_tag).map_err(|_| {
+        BroadcasterError::InvalidTransactEnvelopeEncryptedData(
+            "broadcaster transact encryptedData[0] must be valid hex",
+        )
+    })?;
+    if iv_tag_bytes.len() != IV_TAG_LENGTH {
+        return Err(BroadcasterError::InvalidTransactEnvelopeEncryptedData(
+            "broadcaster transact encryptedData[0] must contain 16-byte iv and 16-byte tag",
+        ));
+    }
+
+    let ciphertext_bytes = hex::decode(ciphertext).map_err(|_| {
+        BroadcasterError::InvalidTransactEnvelopeEncryptedData(
+            "broadcaster transact encryptedData[1] must be valid hex",
+        )
+    })?;
+
+    let mut iv = [0_u8; IV_LENGTH];
+    iv.copy_from_slice(&iv_tag_bytes[..IV_LENGTH]);
+    let mut tag = [0_u8; TAG_LENGTH];
+    tag.copy_from_slice(&iv_tag_bytes[IV_LENGTH..]);
+
+    Ok(DecodedEncryptedData { iv, tag, ciphertext: ciphertext_bytes })
 }
 
 fn encrypt_json_payload(
@@ -49,6 +138,25 @@ fn encrypt_json_payload(
     ]))
 }
 
+fn decrypt_json_payload(
+    encrypted_data: &BroadcasterEncryptedData,
+    shared_key: &[u8; 32],
+) -> Result<String, BroadcasterError> {
+    let DecodedEncryptedData { iv, tag, mut ciphertext } = decode_encrypted_data(encrypted_data)?;
+    let cipher = Aes256Gcm16::new_from_slice(shared_key)
+        .map_err(|_| BroadcasterError::TransactDecryptionFailed)?;
+    cipher
+        .decrypt_in_place_detached(
+            GenericArray::from_slice(&iv),
+            b"",
+            &mut ciphertext,
+            &GenericArray::clone_from_slice(&tag),
+        )
+        .map_err(|_| BroadcasterError::TransactDecryptionFailed)?;
+
+    String::from_utf8(ciphertext).map_err(|_| BroadcasterError::InvalidTransactPayloadUtf8)
+}
+
 fn encrypt_transact_common_payload_with_ephemeral_key_and_iv(
     broadcaster_viewing_key: &ViewingPublicKey,
     payload: &BroadcasterRawParamsTransactCommon,
@@ -56,7 +164,8 @@ fn encrypt_transact_common_payload_with_ephemeral_key_and_iv(
     iv: [u8; IV_LENGTH],
 ) -> Result<BroadcasterTransactEnvelope, BroadcasterError> {
     let serialized = serialize_transact_common_payload(payload)?;
-    let shared_key = derive_transact_shared_key(ephemeral_private_key, broadcaster_viewing_key)?;
+    let shared_key =
+        derive_transact_shared_key_for_encryption(ephemeral_private_key, broadcaster_viewing_key)?;
     let pubkey = derive_viewing_public_key(ephemeral_private_key);
     let encrypted_data = encrypt_json_payload(serialized.as_bytes(), &shared_key, iv)?;
 
@@ -104,6 +213,28 @@ pub fn encrypt_transact_common_payload_with_ephemeral_key(
     )
 }
 
+/// Decrypts a canonical broadcaster transact envelope into its plaintext JSON and
+/// typed COMMON transact payload.
+///
+/// # Errors
+///
+/// Returns an error if the envelope public key or encrypted tuple is malformed,
+/// shared-key derivation fails, decryption fails, or the decrypted JSON does not
+/// match the canonical COMMON transact payload schema.
+pub fn decrypt_transact_common_envelope(
+    broadcaster_viewing_private_key: &ViewingPrivateKey,
+    envelope: &BroadcasterTransactEnvelope,
+) -> Result<BroadcasterDecryptedTransactCommon, BroadcasterError> {
+    let shared_key = derive_transact_shared_key_for_decryption(
+        broadcaster_viewing_private_key,
+        envelope.pubkey(),
+    )?;
+    let plaintext = decrypt_json_payload(envelope.encrypted_data(), &shared_key)?;
+    let payload = parse_transact_common_payload(&plaintext)?;
+
+    Ok(BroadcasterDecryptedTransactCommon::new(plaintext, payload))
+}
+
 #[cfg(test)]
 mod tests {
     use aes_gcm::{
@@ -123,13 +254,16 @@ mod tests {
     };
 
     use super::{
-        IV_LENGTH, derive_transact_shared_key, ed25519_private_scalar, encrypt_json_payload,
-        encrypt_transact_common_payload, encrypt_transact_common_payload_with_ephemeral_key,
+        IV_LENGTH, TAG_LENGTH, decrypt_transact_common_envelope,
+        derive_transact_shared_key_for_decryption, ed25519_private_scalar,
+        encrypt_json_payload, encrypt_transact_common_payload,
+        encrypt_transact_common_payload_with_ephemeral_key,
         encrypt_transact_common_payload_with_ephemeral_key_and_iv,
     };
     use crate::{
         BroadcasterEncryptedData, BroadcasterError, BroadcasterRawParamsTransactCommon,
-        BroadcasterRequestSharedParams, BroadcasterVersionRange, parse_transact_common_payload,
+        BroadcasterRequestSharedParams, BroadcasterTransactEnvelope, BroadcasterVersionRange,
+        parse_transact_common_payload, serialize_transact_common_payload,
     };
 
     type Aes256Gcm16 = AesGcm<Aes256, aes_gcm::aead::consts::U16>;
@@ -187,8 +321,9 @@ mod tests {
         encrypted_data: &BroadcasterEncryptedData,
         client_pubkey: &ViewingPublicKey,
     ) -> String {
-        let shared_key = derive_transact_shared_key(broadcaster_viewing_private_key, client_pubkey)
-            .unwrap_or_else(|error| panic!("shared key should derive: {error}"));
+        let shared_key =
+            derive_transact_shared_key_for_decryption(broadcaster_viewing_private_key, client_pubkey)
+                .unwrap_or_else(|error| panic!("shared key should derive: {error}"));
         let parts = encrypted_data.parts();
         let iv_tag = parts[0].strip_prefix("0x").unwrap_or(&parts[0]);
         let ciphertext = parts[1].strip_prefix("0x").unwrap_or(&parts[1]);
@@ -244,10 +379,10 @@ mod tests {
             0x4d, 0x66, 0xcb, 0x5e,
         ]);
         let sender_shared =
-            derive_transact_shared_key(&sender, &derive_viewing_public_key(&receiver))
+            derive_transact_shared_key_for_decryption(&sender, &derive_viewing_public_key(&receiver))
                 .unwrap_or_else(|error| panic!("sender shared key should derive: {error}"));
         let receiver_shared =
-            derive_transact_shared_key(&receiver, &derive_viewing_public_key(&sender))
+            derive_transact_shared_key_for_decryption(&receiver, &derive_viewing_public_key(&sender))
                 .unwrap_or_else(|error| panic!("receiver shared key should derive: {error}"));
 
         assert_eq!(sender_shared, receiver_shared);
@@ -327,7 +462,7 @@ mod tests {
             .unwrap_or_else(|| panic!("public key should decompress"));
         let expected = (point * ed25519_private_scalar(&private_key)).compress().to_bytes();
 
-        let actual = derive_transact_shared_key(&private_key, &public_key)
+        let actual = derive_transact_shared_key_for_decryption(&private_key, &public_key)
             .unwrap_or_else(|error| panic!("shared key should derive: {error}"));
 
         assert_eq!(actual, expected);
@@ -340,5 +475,122 @@ mod tests {
 
         assert_eq!(encrypted.parts()[0].len(), 2 + 32 + 32);
         assert!(encrypted.parts()[1].starts_with("0x"));
+    }
+
+    #[test]
+    fn decrypt_helper_round_trips_encrypted_common_payload() {
+        let broadcaster_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let broadcaster_public_key = derive_viewing_public_key(&broadcaster_private_key);
+        let payload = sample_payload();
+        let serialized = serialize_transact_common_payload(&payload)
+            .unwrap_or_else(|error| panic!("payload should serialize: {error}"));
+        let envelope = encrypt_transact_common_payload_with_ephemeral_key_and_iv(
+            &broadcaster_public_key,
+            &payload,
+            &ViewingPrivateKey::new([9_u8; 32]),
+            [11_u8; IV_LENGTH],
+        )
+        .unwrap_or_else(|error| panic!("payload should encrypt: {error}"));
+
+        let decrypted = decrypt_transact_common_envelope(&broadcaster_private_key, &envelope)
+            .unwrap_or_else(|error| panic!("envelope should decrypt: {error}"));
+
+        assert_eq!(decrypted.plaintext(), serialized);
+        assert_eq!(decrypted.payload(), &payload);
+    }
+
+    #[test]
+    fn decrypt_helper_rejects_invalid_envelope_pubkey() {
+        let envelope = BroadcasterTransactEnvelope::new(
+            ViewingPublicKey::new(invalid_viewing_public_key_bytes()),
+            BroadcasterEncryptedData::new([
+                format!("0x{}{}", hex::encode([1_u8; IV_LENGTH]), hex::encode([2_u8; TAG_LENGTH])),
+                "0x00".to_owned(),
+            ]),
+        );
+
+        let Err(error) = decrypt_transact_common_envelope(&ViewingPrivateKey::new([7_u8; 32]), &envelope)
+        else {
+            panic!("invalid envelope pubkey should fail");
+        };
+
+        assert_eq!(error, BroadcasterError::InvalidTransactEnvelopePubkey);
+    }
+
+    #[test]
+    fn decrypt_helper_rejects_invalid_encrypted_tuple_shape() {
+        let envelope = BroadcasterTransactEnvelope::new(
+            derive_viewing_public_key(&ViewingPrivateKey::new([9_u8; 32])),
+            BroadcasterEncryptedData::new(["0x1234".to_owned(), "0x00".to_owned()]),
+        );
+
+        let Err(error) = decrypt_transact_common_envelope(&ViewingPrivateKey::new([7_u8; 32]), &envelope)
+        else {
+            panic!("invalid encrypted tuple should fail");
+        };
+
+        assert_eq!(
+            error,
+            BroadcasterError::InvalidTransactEnvelopeEncryptedData(
+                "broadcaster transact encryptedData[0] must contain 16-byte iv and 16-byte tag",
+            )
+        );
+    }
+
+    #[test]
+    fn decrypt_helper_rejects_wrong_private_key() {
+        let broadcaster_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let broadcaster_public_key = derive_viewing_public_key(&broadcaster_private_key);
+        let envelope = encrypt_transact_common_payload_with_ephemeral_key_and_iv(
+            &broadcaster_public_key,
+            &sample_payload(),
+            &ViewingPrivateKey::new([9_u8; 32]),
+            [11_u8; IV_LENGTH],
+        )
+        .unwrap_or_else(|error| panic!("payload should encrypt: {error}"));
+
+        let Err(error) = decrypt_transact_common_envelope(&ViewingPrivateKey::new([8_u8; 32]), &envelope)
+        else {
+            panic!("wrong private key should fail");
+        };
+
+        assert_eq!(error, BroadcasterError::TransactDecryptionFailed);
+    }
+
+    #[test]
+    fn decrypt_helper_rejects_invalid_typed_payload_after_successful_decryption() {
+        let broadcaster_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let broadcaster_public_key = derive_viewing_public_key(&broadcaster_private_key);
+        let envelope = encrypt_transact_common_payload_with_ephemeral_key_and_iv(
+            &broadcaster_public_key,
+            &sample_payload(),
+            &ViewingPrivateKey::new([9_u8; 32]),
+            [11_u8; IV_LENGTH],
+        )
+        .unwrap_or_else(|error| panic!("payload should encrypt: {error}"));
+        let malformed_plaintext = r#"{"transactType":"COMMON"}"#;
+        let shared_key = derive_transact_shared_key_for_decryption(
+            &broadcaster_private_key,
+            &ViewingPublicKey::new(*envelope.pubkey().as_bytes()),
+        )
+        .unwrap_or_else(|error| panic!("shared key should derive: {error}"));
+        let encrypted_data = encrypt_json_payload(
+            malformed_plaintext.as_bytes(),
+            &shared_key,
+            [12_u8; IV_LENGTH],
+        )
+        .unwrap_or_else(|error| panic!("malformed payload should encrypt: {error}"));
+        let malformed_envelope = BroadcasterTransactEnvelope::new(
+            ViewingPublicKey::new(*envelope.pubkey().as_bytes()),
+            encrypted_data,
+        );
+
+        let Err(error) =
+            decrypt_transact_common_envelope(&broadcaster_private_key, &malformed_envelope)
+        else {
+            panic!("invalid typed payload should fail");
+        };
+
+        assert_eq!(error, BroadcasterError::InvalidTransactPayloadJson);
     }
 }

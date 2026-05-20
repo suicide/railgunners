@@ -52,10 +52,16 @@ pub enum BroadcasterError {
     InvalidTransactEnvelopePayload(&'static str),
     /// The transact envelope public key was malformed.
     InvalidTransactEnvelopePubkey,
+    /// The transact envelope encrypted payload tuple was malformed.
+    InvalidTransactEnvelopeEncryptedData(&'static str),
     /// The broadcaster viewing key used for transact encryption was invalid.
     InvalidBroadcasterEncryptionKey,
     /// Broadcaster transact encryption failed unexpectedly.
     TransactEncryptionFailed,
+    /// Broadcaster transact decryption failed unexpectedly.
+    TransactDecryptionFailed,
+    /// Broadcaster transact plaintext was not valid UTF-8 JSON.
+    InvalidTransactPayloadUtf8,
     /// The transact response JSON could not be parsed.
     InvalidTransactResponsePayloadJson,
     /// The transact response was malformed.
@@ -73,6 +79,7 @@ impl core::fmt::Display for BroadcasterError {
             | Self::InvalidTransactPayload(message)
             | Self::InvalidTransactPoiBundle(message)
             | Self::InvalidTransactEnvelopePayload(message)
+            | Self::InvalidTransactEnvelopeEncryptedData(message)
             | Self::InvalidTransactResponsePayload(message) => formatter.write_str(message),
             Self::InvalidFeeMessageDataHex => {
                 formatter.write_str("broadcaster fee message data must be valid hex")
@@ -95,6 +102,8 @@ impl core::fmt::Display for BroadcasterError {
             Self::InvalidTransactPayloadJson => {
                 formatter.write_str("failed to parse broadcaster transact payload JSON")
             }
+            Self::InvalidTransactPayloadUtf8 => formatter
+                .write_str("broadcaster transact payload must decrypt to valid UTF-8 JSON"),
             Self::UnsupportedTransactType(transact_type) => {
                 write!(formatter, "unsupported broadcaster transact type: {transact_type}")
             }
@@ -124,6 +133,9 @@ impl core::fmt::Display for BroadcasterError {
                 .write_str("broadcaster viewing key must decode to a valid ed25519 public key"),
             Self::TransactEncryptionFailed => {
                 formatter.write_str("failed to encrypt broadcaster transact payload")
+            }
+            Self::TransactDecryptionFailed => {
+                formatter.write_str("failed to decrypt broadcaster transact payload")
             }
             Self::InvalidTransactResponsePayloadJson => {
                 formatter.write_str("failed to parse broadcaster transact response JSON")
