@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use railgun_core::decode_railgun_address;
 use railgun_poi::PoiListKey;
-use railgun_types::RailgunAddress;
+use railgun_types::{RailgunAddress, ViewingPrivateKey};
 use serde::{Deserialize, Serialize};
 
 use crate::BroadcasterError;
@@ -49,7 +49,59 @@ pub struct BroadcasterFeeMessageData {
     reliability: f64,
 }
 
+/// Inputs for validated broadcaster fee quote construction.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BroadcasterFeeMessageDataFields {
+    /// Canonical token-fee mapping.
+    pub fees: BTreeMap<String, String>,
+    /// Fee-expiration timestamp in milliseconds.
+    pub fee_expiration: u64,
+    /// Broadcaster-generated fee quote identifier.
+    pub fees_id: String,
+    /// Broadcaster Railgun address.
+    pub railgun_address: RailgunAddress,
+    /// Optional broadcaster identifier.
+    pub identifier: Option<String>,
+    /// Current available-wallet count.
+    pub available_wallets: u64,
+    /// Broadcaster version string.
+    pub version: String,
+    /// Relay-adapt contract address string.
+    pub relay_adapt: String,
+    /// Required POI list keys.
+    pub required_poi_list_keys: Vec<PoiListKey>,
+    /// Broadcaster reliability score.
+    pub reliability: f64,
+}
+
 impl BroadcasterFeeMessageData {
+    /// Creates validated broadcaster fee quote data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any required canonical field is empty.
+    pub fn new(fields: BroadcasterFeeMessageDataFields) -> Result<Self, BroadcasterError> {
+        validate_fee_message_data_fields(
+            &fields.fees_id,
+            &fields.railgun_address,
+            &fields.version,
+            &fields.relay_adapt,
+        )?;
+
+        Ok(Self {
+            fees: fields.fees,
+            fee_expiration: fields.fee_expiration,
+            fees_id: fields.fees_id,
+            railgun_address: fields.railgun_address,
+            identifier: fields.identifier,
+            available_wallets: fields.available_wallets,
+            version: fields.version,
+            relay_adapt: fields.relay_adapt,
+            required_poi_list_keys: fields.required_poi_list_keys,
+            reliability: fields.reliability,
+        })
+    }
+
     /// Returns the canonical token-fee mapping.
     #[must_use]
     pub fn fees(&self) -> &BTreeMap<String, String> {
@@ -120,6 +172,12 @@ pub struct BroadcasterFeeMessage {
 }
 
 impl BroadcasterFeeMessage {
+    /// Creates a parsed broadcaster fee-message envelope.
+    #[must_use]
+    pub fn new(data: BroadcasterFeeMessageData, encoded_data: String, signature: String) -> Self {
+        Self { data, encoded_data, signature }
+    }
+
     /// Returns the parsed fee-message data.
     #[must_use]
     pub const fn data(&self) -> &BroadcasterFeeMessageData {
@@ -139,27 +197,42 @@ impl BroadcasterFeeMessage {
     }
 }
 
+fn validate_fee_message_data_fields(
+    fees_id: &str,
+    railgun_address: &RailgunAddress,
+    version: &str,
+    relay_adapt: &str,
+) -> Result<(), BroadcasterError> {
+    if fees_id.is_empty() {
+        return Err(BroadcasterError::InvalidFeeMessageField("feesID must not be empty"));
+    }
+    if railgun_address.as_str().is_empty() {
+        return Err(BroadcasterError::InvalidFeeMessageField(
+            "railgunAddress must not be empty",
+        ));
+    }
+    if version.is_empty() {
+        return Err(BroadcasterError::InvalidFeeMessageField("version must not be empty"));
+    }
+    if relay_adapt.is_empty() {
+        return Err(BroadcasterError::InvalidFeeMessageField("relayAdapt must not be empty"));
+    }
+
+    Ok(())
+}
+
 impl TryFrom<BroadcasterFeeMessageDataWire> for BroadcasterFeeMessageData {
     type Error = BroadcasterError;
 
     fn try_from(value: BroadcasterFeeMessageDataWire) -> Result<Self, Self::Error> {
-        if value.fees_id.is_empty() {
-            return Err(BroadcasterError::InvalidFeeMessageField("feesID must not be empty"));
-        }
-        if value.railgun_address.is_empty() {
-            return Err(BroadcasterError::InvalidFeeMessageField(
-                "railgunAddress must not be empty",
-            ));
-        }
-        if value.version.is_empty() {
-            return Err(BroadcasterError::InvalidFeeMessageField("version must not be empty"));
-        }
-        if value.relay_adapt.is_empty() {
-            return Err(BroadcasterError::InvalidFeeMessageField("relayAdapt must not be empty"));
-        }
-
         let railgun_address = RailgunAddress::parse(&value.railgun_address)
             .map_err(|_| BroadcasterError::InvalidFeeMessageField("railgunAddress is invalid"))?;
+        validate_fee_message_data_fields(
+            &value.fees_id,
+            &railgun_address,
+            &value.version,
+            &value.relay_adapt,
+        )?;
         let required_poi_list_keys = value
             .required_poi_list_keys
             .iter()
@@ -172,7 +245,7 @@ impl TryFrom<BroadcasterFeeMessageDataWire> for BroadcasterFeeMessageData {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Self {
+        Self::new(BroadcasterFeeMessageDataFields {
             fees: value.fees,
             fee_expiration: value.fee_expiration,
             fees_id: value.fees_id,
@@ -184,6 +257,27 @@ impl TryFrom<BroadcasterFeeMessageDataWire> for BroadcasterFeeMessageData {
             required_poi_list_keys,
             reliability: value.reliability,
         })
+    }
+}
+
+impl From<&BroadcasterFeeMessageData> for BroadcasterFeeMessageDataWire {
+    fn from(value: &BroadcasterFeeMessageData) -> Self {
+        Self {
+            fees: value.fees().clone(),
+            fee_expiration: value.fee_expiration(),
+            fees_id: value.fees_id().to_owned(),
+            railgun_address: value.railgun_address().as_str().to_owned(),
+            identifier: value.identifier().map(ToOwned::to_owned),
+            available_wallets: value.available_wallets(),
+            version: value.version().to_owned(),
+            relay_adapt: value.relay_adapt().to_owned(),
+            required_poi_list_keys: value
+                .required_poi_list_keys()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            reliability: value.reliability(),
+        }
     }
 }
 
@@ -242,7 +336,40 @@ pub fn parse_fee_message_data(
 pub fn parse_fee_message_payload(payload: &str) -> Result<BroadcasterFeeMessage, BroadcasterError> {
     let (encoded_data, signature) = parse_fee_message_wire(payload)?;
     let data = parse_fee_message_data(&encoded_data)?;
-    Ok(BroadcasterFeeMessage { data, encoded_data, signature })
+    Ok(BroadcasterFeeMessage::new(data, encoded_data, signature))
+}
+
+/// Serializes canonical broadcaster fee-message data into the exact hex-encoded
+/// UTF-8 JSON string used as signing input.
+///
+/// # Errors
+///
+/// Returns an error if serialization fails unexpectedly.
+pub fn serialize_fee_message_data(
+    data: &BroadcasterFeeMessageData,
+) -> Result<String, BroadcasterError> {
+    let json = serde_json::to_string(&BroadcasterFeeMessageDataWire::from(data))
+        .map_err(|_| BroadcasterError::InvalidFeeMessageDataJson)?;
+    Ok(format!("0x{}", hex::encode(json.as_bytes())))
+}
+
+/// Signs canonical broadcaster fee-message data into a typed fee-message envelope.
+///
+/// # Errors
+///
+/// Returns an error if canonical fee-message data serialization fails.
+pub fn sign_fee_message(
+    data: &BroadcasterFeeMessageData,
+    viewing_private_key: &ViewingPrivateKey,
+) -> Result<BroadcasterFeeMessage, BroadcasterError> {
+    let encoded_data = serialize_fee_message_data(data)?;
+    let signature = SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
+
+    Ok(BroadcasterFeeMessage::new(
+        data.clone(),
+        encoded_data,
+        format!("0x{}", hex::encode(signature.to_bytes())),
+    ))
 }
 
 /// Verifies the broadcaster fee-message signature against the broadcaster identity.
@@ -305,15 +432,18 @@ mod tests {
 
     use ed25519_dalek::{Signer, SigningKey};
     use railgun_core::{derive_viewing_public_key, encode_railgun_address};
+    use railgun_poi::PoiListKey;
     use railgun_types::{ChainScope, MasterPublicKey, ViewingPrivateKey};
 
     use super::{
-        BroadcasterError, BroadcasterFeeMessageDataWire, parse_fee_message_data,
-        parse_fee_message_payload, validate_fee_message, validate_fee_message_at,
-        verify_fee_message_signature,
+        BroadcasterError, BroadcasterFeeMessageData, BroadcasterFeeMessageDataFields,
+        BroadcasterFeeMessageDataWire, parse_fee_message_data, parse_fee_message_payload,
+        serialize_fee_message_data, sign_fee_message, validate_fee_message,
+        validate_fee_message_at, verify_fee_message_signature,
     };
+    use crate::serialize_fee_message_payload;
 
-    fn sample_fee_message_json() -> String {
+    fn sample_fee_message_data() -> BroadcasterFeeMessageData {
         let viewing_private_key = ViewingPrivateKey::new([7_u8; 32]);
         let viewing_public_key = derive_viewing_public_key(&viewing_private_key);
         let railgun_address = encode_railgun_address(
@@ -328,25 +458,30 @@ mod tests {
         let mut fees = BTreeMap::new();
         fees.insert("0x12345".to_owned(), "0x0de0b6b3a7640000".to_owned());
 
-        let data = BroadcasterFeeMessageDataWire {
+        BroadcasterFeeMessageData::new(BroadcasterFeeMessageDataFields {
             fees,
             fee_expiration: 1_800_000_000_000,
             fees_id: "fees-cache-id".to_owned(),
-            railgun_address: railgun_address.as_str().to_owned(),
+            railgun_address,
             identifier: Some("test-broadcaster".to_owned()),
             available_wallets: 4,
             version: "0.1.0".to_owned(),
             relay_adapt: "0x1111111111111111111111111111111111111111".to_owned(),
             required_poi_list_keys: vec![
-                "efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88".to_owned(),
+                PoiListKey::parse("efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88")
+                    .unwrap_or_else(|error| panic!("test list key should parse: {error}")),
             ],
             reliability: 0.92,
-        };
-        let data_json = serde_json::to_string(&data)
+        })
+        .unwrap_or_else(|error| panic!("test fee data should construct: {error}"))
+    }
+
+    fn sample_fee_message_json() -> String {
+        let viewing_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let data = sample_fee_message_data();
+        let encoded_data = serialize_fee_message_data(&data)
             .unwrap_or_else(|error| panic!("test fee data should serialize: {error}"));
-        let encoded_data = format!("0x{}", hex::encode(data_json.as_bytes()));
-        let signature =
-            SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
+        let signature = SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
 
         serde_json::json!({
             "data": encoded_data,
@@ -467,5 +602,63 @@ mod tests {
 
         validate_fee_message(&message, 1_800_000_000_000)
             .unwrap_or_else(|error| panic!("fee message should validate: {error}"));
+    }
+
+    #[test]
+    fn serializes_fee_message_data_deterministically() {
+        let first = serialize_fee_message_data(&sample_fee_message_data())
+            .unwrap_or_else(|error| panic!("first serialization should succeed: {error}"));
+        let second = serialize_fee_message_data(&sample_fee_message_data())
+            .unwrap_or_else(|error| panic!("second serialization should succeed: {error}"));
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn signed_fee_message_round_trips_and_verifies() {
+        let viewing_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let message = sign_fee_message(&sample_fee_message_data(), &viewing_private_key)
+            .unwrap_or_else(|error| panic!("fee message should sign: {error}"));
+        let payload = serialize_fee_message_payload(&message)
+            .unwrap_or_else(|error| panic!("signed fee message should serialize: {error}"));
+        let reparsed = parse_fee_message_payload(&payload)
+            .unwrap_or_else(|error| panic!("signed fee message should parse: {error}"));
+
+        verify_fee_message_signature(&reparsed)
+            .unwrap_or_else(|error| panic!("signed fee message should verify: {error}"));
+        assert_eq!(reparsed.data(), &sample_fee_message_data());
+    }
+
+    #[test]
+    fn sign_fee_message_is_deterministic_for_identical_inputs() {
+        let viewing_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let first = sign_fee_message(&sample_fee_message_data(), &viewing_private_key)
+            .unwrap_or_else(|error| panic!("first message should sign: {error}"));
+        let second = sign_fee_message(&sample_fee_message_data(), &viewing_private_key)
+            .unwrap_or_else(|error| panic!("second message should sign: {error}"));
+
+        assert_eq!(first.encoded_data(), second.encoded_data());
+        assert_eq!(first.signature(), second.signature());
+    }
+
+    #[test]
+    fn rejects_missing_required_field_during_construction() {
+        let data = sample_fee_message_data();
+        let Err(error) = BroadcasterFeeMessageData::new(BroadcasterFeeMessageDataFields {
+            fees: data.fees().clone(),
+            fee_expiration: data.fee_expiration(),
+            fees_id: String::new(),
+            railgun_address: data.railgun_address().clone(),
+            identifier: data.identifier().map(ToOwned::to_owned),
+            available_wallets: data.available_wallets(),
+            version: data.version().to_owned(),
+            relay_adapt: data.relay_adapt().to_owned(),
+            required_poi_list_keys: data.required_poi_list_keys().to_vec(),
+            reliability: data.reliability(),
+        }) else {
+            panic!("missing fees id should fail");
+        };
+
+        assert_eq!(error, BroadcasterError::InvalidFeeMessageField("feesID must not be empty"));
     }
 }

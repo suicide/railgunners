@@ -12,9 +12,10 @@ pub use encrypt::{
 };
 pub use error::BroadcasterError;
 pub use fee::{
-    BroadcasterFeeMessage, BroadcasterFeeMessageData, parse_fee_message_data,
-    parse_fee_message_payload, parse_fee_message_wire, validate_fee_message,
-    validate_fee_message_at, verify_fee_message_signature,
+    BroadcasterFeeMessage, BroadcasterFeeMessageData, BroadcasterFeeMessageDataFields,
+    parse_fee_message_data, parse_fee_message_payload, parse_fee_message_wire,
+    serialize_fee_message_data, sign_fee_message, validate_fee_message, validate_fee_message_at,
+    verify_fee_message_signature,
 };
 pub use transact::{
     BroadcasterRawParamsTransactCommon, BroadcasterRequestSharedParams,
