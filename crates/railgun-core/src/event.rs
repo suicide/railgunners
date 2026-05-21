@@ -2,12 +2,14 @@
 
 use core::fmt;
 
+use alloy_primitives::{Bytes, FixedBytes, LogData, U256};
+use alloy_sol_types::{SolEvent, sol};
 use num_bigint::BigUint;
 use railgun_types::{
     AccumulatorTransactionIndex, Address, BlockNumber, BoundParamsHash, CommitmentLeafPosition,
     DecodedCommitmentCiphertextV2, DecodedCommitmentCiphertextV3, EventLogIndex, NoteCommitment,
     NotePublicKey, NoteValue, Nullifier, ParseDomainError, RailgunTxid, SenderCiphertext,
-    ShieldCommitment, ShieldPreimage, TokenData, TokenSubId, TokenType,
+    ShieldCommitment, ShieldPreimage, TREE_MAX_ITEMS, TokenData, TokenHash, TokenSubId, TokenType,
     TransactCommitmentBatchIndex, TxHash, UnshieldData, UtxoLeafCoordinate, UtxoTreeCoordinate,
     V2Commitment, V2CommitmentEvent, V2NullifierEvent, V2TransactCommitment, V2UnshieldEvent,
     V3Commitment, V3CommitmentEvent, V3NullifierEvent, V3TransactCommitment, V3TransactionEvent,
@@ -17,9 +19,95 @@ use railgun_types::{
 
 use crate::{
     CommitmentCiphertextError, KeyDerivationError, ShieldCiphertextError, derive_note_commitment,
-    derive_token_hash, parse_commitment_ciphertext_v2, parse_commitment_ciphertext_v3,
-    parse_shield_ciphertext,
+    derive_railgun_txid, derive_token_hash, parse_commitment_ciphertext_v2,
+    parse_commitment_ciphertext_v3, parse_shield_ciphertext,
 };
+
+sol! {
+    struct EventTokenDataAbi {
+        uint8 tokenType;
+        address tokenAddress;
+        uint256 tokenSubID;
+    }
+
+    struct EventCommitmentPreimageAbi {
+        bytes32 npk;
+        EventTokenDataAbi token;
+        uint120 value;
+    }
+
+    struct EventShieldCiphertextAbi {
+        bytes32[3] encryptedBundle;
+        bytes32 shieldKey;
+    }
+
+    struct EventV2CommitmentCiphertextAbi {
+        bytes32[4] ciphertext;
+        bytes32 blindedSenderViewingKey;
+        bytes32 blindedReceiverViewingKey;
+        bytes annotationData;
+        bytes memo;
+    }
+
+    event V2TransactLog(
+        uint256 treeNumber,
+        uint256 startPosition,
+        bytes32[] hash,
+        EventV2CommitmentCiphertextAbi[] ciphertext
+    );
+
+    event V2ShieldLog(
+        uint256 treeNumber,
+        uint256 startPosition,
+        EventCommitmentPreimageAbi[] commitments,
+        EventShieldCiphertextAbi[] shieldCiphertext,
+        uint256[] fees
+    );
+
+    event V2NullifiedLog(uint16 treeNumber, bytes32[] nullifier);
+
+    event V2UnshieldLog(address to, EventTokenDataAbi token, uint256 amount, uint256 fee);
+
+    struct EventV3TransactionConfigurationAbi {
+        bytes32[] nullifiers;
+        uint8 commitmentsCount;
+        uint32 spendAccumulatorNumber;
+        EventCommitmentPreimageAbi unshieldPreimage;
+        bytes32 boundParamsHash;
+    }
+
+    struct EventV3ShieldConfigurationAbi {
+        address from;
+        EventCommitmentPreimageAbi preimage;
+        EventShieldCiphertextAbi ciphertext;
+    }
+
+    struct EventV3CommitmentCiphertextAbi {
+        bytes ciphertext;
+        bytes32 blindedSenderViewingKey;
+        bytes32 blindedReceiverViewingKey;
+    }
+
+    struct EventV3TreasuryFeeAbi {
+        bytes32 tokenID;
+        uint256 fee;
+    }
+
+    struct EventV3StateUpdateAbi {
+        bytes32[] commitments;
+        EventV3TransactionConfigurationAbi[] transactions;
+        EventV3ShieldConfigurationAbi[] shields;
+        EventV3CommitmentCiphertextAbi[] commitmentCiphertext;
+        EventV3TreasuryFeeAbi[] treasuryFees;
+        bytes senderCiphertext;
+    }
+
+    event V3AccumulatorStateUpdateLog(
+        EventV3StateUpdateAbi update,
+        uint32 accumulatorNumber,
+        uint224 startPosition
+    );
+}
 
 /// Error returned when decoded event normalization fails.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -394,6 +482,20 @@ pub struct V2UnshieldEventInput {
     pub fee: Option<Vec<u8>>,
 }
 
+/// Public parser input for a decoded V3 shield event.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(missing_docs)]
+pub struct V3ShieldEventInput {
+    pub transaction_hash: Option<Vec<u8>>,
+    pub block_number: Option<u64>,
+    pub tree_number: Option<u32>,
+    pub start_position: Option<u32>,
+    pub preimage: Option<DecodedShieldPreimageInput>,
+    pub shield_ciphertext: Option<DecodedShieldCiphertextInput>,
+    pub fee: Option<Vec<u8>>,
+    pub from_address: Option<Vec<u8>>,
+}
+
 /// Public parser input for a decoded V3 transact event.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(missing_docs)]
@@ -619,6 +721,48 @@ pub fn decode_v2_unshield_event(
     ))
 }
 
+/// Decodes one V3 shield event into the canonical typed model.
+///
+/// # Errors
+///
+/// Returns an error if any required field is missing, any shield ciphertext is malformed,
+/// or any typed token, address, or value field is invalid.
+pub fn decode_v3_shield_event(input: V3ShieldEventInput) -> Result<V3CommitmentEvent, EventError> {
+    let txid = parse_tx_hash(&required(input.transaction_hash, "transaction_hash")?)?;
+    let block_number = BlockNumber::new(required(input.block_number, "block_number")?);
+    let tree_number = UtxoTreeCoordinate::from_raw(required(input.tree_number, "tree_number")?)
+        .map_err(|error| parse_domain_error(&error))?;
+    let start_position =
+        CommitmentLeafPosition::new(required(input.start_position, "start_position")?);
+    let pre_image = parse_shield_preimage(required(input.preimage, "preimage")?)?;
+    let shield_ciphertext =
+        parse_shield_ciphertext_input(required(input.shield_ciphertext, "shield_ciphertext")?)?;
+    let fee = input.fee.as_deref().map(|bytes| parse_note_value(bytes, "fee")).transpose()?;
+    let from_address = input
+        .from_address
+        .as_deref()
+        .map(|bytes| parse_address(bytes, "from_address"))
+        .transpose()?;
+
+    Ok(V3CommitmentEvent::new(
+        txid,
+        tree_number,
+        start_position,
+        vec![V3Commitment::Shield(ShieldCommitment::new(
+            derive_shield_event_commitment(&pre_image)?,
+            txid,
+            block_number,
+            pre_image,
+            shield_ciphertext,
+            fee,
+            tree_number,
+            start_position,
+            from_address,
+        ))],
+        block_number,
+    ))
+}
+
 /// Decodes one V3 transact event into the canonical typed model.
 ///
 /// # Errors
@@ -791,6 +935,9 @@ pub fn decode_commitment_event(
         DecodedCommitmentEventInput::V2Shield(input) => {
             decode_v2_shield_event(input).map(VersionedCommitmentEvent::V2)
         }
+        DecodedCommitmentEventInput::V3Shield(input) => {
+            decode_v3_shield_event(input).map(VersionedCommitmentEvent::V3)
+        }
         DecodedCommitmentEventInput::V3Transact(input) => {
             decode_v3_transact_event(input).map(VersionedCommitmentEvent::V3)
         }
@@ -840,6 +987,8 @@ pub enum DecodedCommitmentEventInput {
     V2Transact(V2TransactEventInput),
     /// V2 shield event.
     V2Shield(V2ShieldEventInput),
+    /// V3 shield event.
+    V3Shield(V3ShieldEventInput),
     /// V3 transact event.
     V3Transact(V3TransactEventInput),
 }
@@ -862,25 +1011,688 @@ pub enum DecodedUnshieldEventInput {
     V3(V3UnshieldEventInput),
 }
 
+/// Explicit contract-version context for raw Railgun log decoding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RawRailgunLogVersion {
+    /// Decode as a V2 `RailgunSmartWallet` log.
+    V2,
+    /// Decode as a V3 `PoseidonMerkleAccumulator` log.
+    V3,
+}
+
+/// Minimal provider-agnostic raw log input for canonical Railgun event decoding.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RawRailgunLog {
+    /// Emitting contract address.
+    pub contract_address: Address,
+    /// Raw EVM topics in emitted order.
+    pub topics: Vec<[u8; 32]>,
+    /// Raw ABI-encoded data payload.
+    pub data: Vec<u8>,
+    /// Containing transaction hash when available.
+    pub transaction_hash: Option<TxHash>,
+    /// Containing block number when available.
+    pub block_number: Option<u64>,
+    /// EVM log index when available.
+    pub log_index: Option<u64>,
+}
+
+/// Version-aware canonical event output derived from a raw Railgun log.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DecodedRailgunLogEvent {
+    /// Commitment-oriented event.
+    Commitment(VersionedCommitmentEvent),
+    /// Nullifier-oriented event.
+    Nullifier(VersionedNullifierEvent),
+    /// Unshield-oriented event.
+    Unshield(VersionedUnshieldEvent),
+}
+
+/// Error returned when raw Railgun log decoding fails.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RawRailgunLogError {
+    /// The log did not contain the expected topic count.
+    InvalidTopicCount {
+        /// Expected number of topics.
+        expected: usize,
+        /// Actual number of topics.
+        actual: usize,
+    },
+    /// The event topic is not supported for the selected version.
+    UnsupportedTopic([u8; 32]),
+    /// The selected contract version does not support this topic.
+    UnsupportedVersionTopic {
+        /// Selected version.
+        version: RawRailgunLogVersion,
+        /// Event topic hash.
+        topic: [u8; 32],
+    },
+    /// One raw numeric field could not fit the canonical target type.
+    ValueOutOfRange(&'static str),
+    /// A required receipt or log context field was missing.
+    MissingContext(&'static str),
+    /// ABI event decoding failed.
+    AbiDecodeFailed(&'static str),
+    /// The accumulator payload was internally inconsistent.
+    MalformedAccumulatorUpdate(&'static str),
+    /// One fee/value relationship was invalid.
+    InvalidFeeSplit(&'static str),
+    /// Canonical event normalization failed after ABI decoding.
+    Event(EventError),
+}
+
+impl fmt::Display for RawRailgunLogError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidTopicCount { expected, actual } => {
+                write!(formatter, "invalid topic count: expected {expected}, got {actual}")
+            }
+            Self::UnsupportedTopic(topic) => {
+                write!(formatter, "unsupported Railgun event topic: {topic:02x?}")
+            }
+            Self::UnsupportedVersionTopic { version, topic } => {
+                write!(formatter, "topic {topic:02x?} is unsupported for {version:?}")
+            }
+            Self::ValueOutOfRange(field) => {
+                write!(formatter, "raw log value out of range for {field}")
+            }
+            Self::MissingContext(field) => {
+                write!(formatter, "missing required raw log context: {field}")
+            }
+            Self::AbiDecodeFailed(event_name) => {
+                write!(formatter, "failed to ABI decode {event_name} log payload")
+            }
+            Self::MalformedAccumulatorUpdate(message) | Self::InvalidFeeSplit(message) => {
+                formatter.write_str(message)
+            }
+            Self::Event(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for RawRailgunLogError {}
+
+impl From<EventError> for RawRailgunLogError {
+    fn from(error: EventError) -> Self {
+        Self::Event(error)
+    }
+}
+
+fn raw_log_data(log: &RawRailgunLog) -> LogData {
+    LogData::new_unchecked(
+        log.topics.iter().copied().map(FixedBytes::<32>::from).collect(),
+        Bytes::from(log.data.clone()),
+    )
+}
+
+fn raw_transaction_hash(log: &RawRailgunLog) -> Result<Vec<u8>, RawRailgunLogError> {
+    log.transaction_hash
+        .as_ref()
+        .map(|hash| hash.as_bytes().to_vec())
+        .ok_or(RawRailgunLogError::MissingContext("transaction_hash"))
+}
+
+fn raw_block_number(log: &RawRailgunLog) -> Result<u64, RawRailgunLogError> {
+    log.block_number.ok_or(RawRailgunLogError::MissingContext("block_number"))
+}
+
+fn event_token_data_input(token_data: &EventTokenDataAbi) -> DecodedTokenDataInput {
+    DecodedTokenDataInput {
+        token_address: Some(token_data.tokenAddress.as_slice().to_vec()),
+        token_type: Some(token_data.tokenType),
+        token_sub_id: Some(token_data.tokenSubID.to_be_bytes::<32>().to_vec()),
+    }
+}
+
+fn event_preimage_input(preimage: &EventCommitmentPreimageAbi) -> DecodedShieldPreimageInput {
+    let value = u128::try_from(preimage.value)
+        .unwrap_or_else(|_| unreachable!("uint120 always fits into u128"));
+    DecodedShieldPreimageInput {
+        note_public_key: Some(preimage.npk.as_slice().to_vec()),
+        token_data: Some(event_token_data_input(&preimage.token)),
+        value: Some(value.to_be_bytes().to_vec()),
+    }
+}
+
+fn event_shield_ciphertext_input(
+    ciphertext: &EventShieldCiphertextAbi,
+) -> DecodedShieldCiphertextInput {
+    DecodedShieldCiphertextInput {
+        encrypted_bundle: Some(
+            ciphertext
+                .encryptedBundle
+                .iter()
+                .map(|word| word.as_slice().to_vec())
+                .collect(),
+        ),
+        shield_key: Some(ciphertext.shieldKey.as_slice().to_vec()),
+    }
+}
+
+fn note_value_bytes_from_u256(
+    value: U256,
+    field: &'static str,
+) -> Result<Vec<u8>, RawRailgunLogError> {
+    let bytes = value.to_be_bytes::<32>();
+    if bytes[..16].iter().any(|byte| *byte != 0) {
+        return Err(RawRailgunLogError::ValueOutOfRange(field));
+    }
+    Ok(bytes[16..].to_vec())
+}
+
+fn u32_from_uint<T>(value: T, field: &'static str) -> Result<u32, RawRailgunLogError>
+where
+    T: TryInto<u32>,
+{
+    value.try_into().map_err(|_| RawRailgunLogError::ValueOutOfRange(field))
+}
+
+fn token_hash_from_preimage(
+    preimage: &EventCommitmentPreimageAbi,
+) -> Result<TokenHash, RawRailgunLogError> {
+    let token_data = parse_token_data(event_token_data_input(&preimage.token))?;
+    Ok(derive_token_hash(&token_data))
+}
+
+fn railgun_txid_bytes(railgun_txid: &RailgunTxid) -> Vec<u8> {
+    let bytes = railgun_txid.value().to_bytes_be();
+    let mut padded = [0_u8; 32];
+    let start = 32 - bytes.len();
+    padded[start..].copy_from_slice(&bytes);
+    padded.to_vec()
+}
+
+fn split_treasury_fees(
+    transactions: &[EventV3TransactionConfigurationAbi],
+    shields: &[EventV3ShieldConfigurationAbi],
+    treasury_fees: &[EventV3TreasuryFeeAbi],
+) -> Result<std::collections::BTreeMap<[u8; 32], (U256, U256)>, RawRailgunLogError> {
+    let mut split = std::collections::BTreeMap::new();
+
+    for treasury_fee in treasury_fees {
+        let token_id: [u8; 32] = treasury_fee.tokenID.as_slice().try_into().map_err(|_| {
+            RawRailgunLogError::MalformedAccumulatorUpdate("treasury token id must be 32 bytes")
+        })?;
+        let unshield_value = transactions
+            .iter()
+            .find(|transaction| {
+                token_hash_from_preimage(&transaction.unshieldPreimage)
+                    .is_ok_and(|hash| hash.as_bytes() == treasury_fee.tokenID.as_slice())
+            })
+            .map_or(U256::ZERO, |transaction| U256::from(transaction.unshieldPreimage.value));
+        let shield_value = shields
+            .iter()
+            .find(|shield| {
+                token_hash_from_preimage(&shield.preimage)
+                    .is_ok_and(|hash| hash.as_bytes() == treasury_fee.tokenID.as_slice())
+            })
+            .map_or(U256::ZERO, |shield| U256::from(shield.preimage.value));
+
+        let (shield_fee, unshield_fee) = if unshield_value < shield_value {
+            let unshield_fee = if unshield_value.is_zero() {
+                U256::ZERO
+            } else {
+                treasury_fee.fee * unshield_value / (unshield_value + shield_value)
+            };
+            (treasury_fee.fee - unshield_fee, unshield_fee)
+        } else {
+            let shield_fee = if shield_value.is_zero() {
+                U256::ZERO
+            } else {
+                treasury_fee.fee * shield_value / (unshield_value + shield_value)
+            };
+            (shield_fee, treasury_fee.fee - shield_fee)
+        };
+
+        split.insert(token_id, (shield_fee, unshield_fee));
+    }
+
+    Ok(split)
+}
+
+fn derive_v3_log_railgun_txid(
+    transaction: &EventV3TransactionConfigurationAbi,
+    commitment_hashes: &[FixedBytes<32>],
+) -> Result<RailgunTxid, RawRailgunLogError> {
+    let mut commitments = commitment_hashes
+        .iter()
+        .map(|hash| parse_scalar_note_commitment(hash.as_slice(), "commitment_hash"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let nullifiers = transaction
+        .nullifiers
+        .iter()
+        .map(|nullifier| parse_scalar_nullifier(nullifier.as_slice(), "nullifier"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let bound_params_hash = parse_bound_params_hash(transaction.boundParamsHash.as_slice())?;
+
+    if transaction.unshieldPreimage.value > 0 {
+        let preimage =
+            parse_shield_preimage(event_preimage_input(&transaction.unshieldPreimage))?;
+        commitments.push(derive_shield_event_commitment(&preimage)?);
+    }
+
+    derive_railgun_txid(&nullifiers, &commitments, &bound_params_hash).map_err(|error| {
+        RawRailgunLogError::MalformedAccumulatorUpdate(match error {
+            crate::RailgunTxidError::TooManyNullifiers => "too many V3 nullifiers for railgun txid",
+            crate::RailgunTxidError::TooManyCommitments => {
+                "too many V3 commitments for railgun txid"
+            }
+            crate::RailgunTxidError::InvalidBoundParamsHash => "invalid V3 bound params hash",
+            crate::RailgunTxidError::HashingFailure => "failed to derive V3 railgun txid",
+        })
+    })
+}
+
+fn decode_v2_transact_raw_log(
+    log: &RawRailgunLog,
+) -> Result<Vec<DecodedRailgunLogEvent>, RawRailgunLogError> {
+    let decoded = V2TransactLog::decode_log_data(&raw_log_data(log))
+        .map_err(|_| RawRailgunLogError::AbiDecodeFailed("V2 Transact"))?;
+
+    Ok(vec![DecodedRailgunLogEvent::Commitment(decode_commitment_event(
+        DecodedCommitmentEventInput::V2Transact(V2TransactEventInput {
+            transaction_hash: Some(raw_transaction_hash(log)?),
+            block_number: Some(raw_block_number(log)?),
+            tree_number: Some(u32_from_uint(decoded.treeNumber, "tree_number")?),
+            start_position: Some(u32_from_uint(decoded.startPosition, "start_position")?),
+            commitment_hashes: Some(
+                decoded.hash.into_iter().map(|hash| hash.as_slice().to_vec()).collect(),
+            ),
+            commitment_ciphertexts: Some(
+                decoded
+                    .ciphertext
+                    .into_iter()
+                    .map(|ciphertext| DecodedV2CommitmentCiphertextInput {
+                        ciphertext: Some(
+                            ciphertext
+                                .ciphertext
+                                .into_iter()
+                                .map(|word| word.as_slice().to_vec())
+                                .collect(),
+                        ),
+                        blinded_sender_viewing_key: Some(
+                            ciphertext.blindedSenderViewingKey.as_slice().to_vec(),
+                        ),
+                        blinded_receiver_viewing_key: Some(
+                            ciphertext.blindedReceiverViewingKey.as_slice().to_vec(),
+                        ),
+                        annotation_data: Some(ciphertext.annotationData.to_vec()),
+                        memo: Some(ciphertext.memo.to_vec()),
+                    })
+                    .collect(),
+            ),
+            railgun_txid: None,
+        }),
+    )?)])
+}
+
+fn decode_v2_shield_raw_log(
+    log: &RawRailgunLog,
+) -> Result<Vec<DecodedRailgunLogEvent>, RawRailgunLogError> {
+    let decoded = V2ShieldLog::decode_log_data(&raw_log_data(log))
+        .map_err(|_| RawRailgunLogError::AbiDecodeFailed("V2 Shield"))?;
+
+    Ok(vec![DecodedRailgunLogEvent::Commitment(decode_commitment_event(
+        DecodedCommitmentEventInput::V2Shield(V2ShieldEventInput {
+            transaction_hash: Some(raw_transaction_hash(log)?),
+            block_number: Some(raw_block_number(log)?),
+            tree_number: Some(u32_from_uint(decoded.treeNumber, "tree_number")?),
+            start_position: Some(u32_from_uint(decoded.startPosition, "start_position")?),
+            preimages: Some(
+                decoded
+                    .commitments
+                    .into_iter()
+                    .map(|preimage| event_preimage_input(&preimage))
+                    .collect(),
+            ),
+            shield_ciphertexts: Some(
+                decoded
+                    .shieldCiphertext
+                    .into_iter()
+                    .map(|ciphertext| event_shield_ciphertext_input(&ciphertext))
+                    .collect(),
+            ),
+            fees: Some(
+                decoded
+                    .fees
+                    .into_iter()
+                    .map(|fee| note_value_bytes_from_u256(fee, "fee"))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+        }),
+    )?)])
+}
+
+fn decode_v2_nullified_raw_log(
+    log: &RawRailgunLog,
+) -> Result<Vec<DecodedRailgunLogEvent>, RawRailgunLogError> {
+    let decoded = V2NullifiedLog::decode_log_data(&raw_log_data(log))
+        .map_err(|_| RawRailgunLogError::AbiDecodeFailed("V2 Nullified"))?;
+
+    Ok(vec![DecodedRailgunLogEvent::Nullifier(decode_nullifier_event(
+        DecodedNullifierEventInput::V2(V2NullifierEventInput {
+            transaction_hash: Some(raw_transaction_hash(log)?),
+            block_number: Some(raw_block_number(log)?),
+            tree_number: Some(u32::from(decoded.treeNumber)),
+            nullifiers: Some(
+                decoded
+                    .nullifier
+                    .into_iter()
+                    .map(|nullifier| nullifier.as_slice().to_vec())
+                    .collect(),
+            ),
+        }),
+    )?)])
+}
+
+fn decode_v2_unshield_raw_log(
+    log: &RawRailgunLog,
+) -> Result<Vec<DecodedRailgunLogEvent>, RawRailgunLogError> {
+    let decoded = V2UnshieldLog::decode_log_data(&raw_log_data(log))
+        .map_err(|_| RawRailgunLogError::AbiDecodeFailed("V2 Unshield"))?;
+
+    Ok(vec![DecodedRailgunLogEvent::Unshield(decode_unshield_event(
+        DecodedUnshieldEventInput::V2(V2UnshieldEventInput {
+            transaction_hash: Some(raw_transaction_hash(log)?),
+            block_number: Some(raw_block_number(log)?),
+            event_log_index: Some(
+                log.log_index.ok_or(RawRailgunLogError::MissingContext("log_index"))?,
+            ),
+            to_address: Some(decoded.to.as_slice().to_vec()),
+            token_data: Some(event_token_data_input(&decoded.token)),
+            amount: Some(note_value_bytes_from_u256(decoded.amount, "amount")?),
+            fee: Some(note_value_bytes_from_u256(decoded.fee, "fee")?),
+        }),
+    )?)])
+}
+
+#[allow(clippy::too_many_lines)]
+fn decode_v3_accumulator_raw_log(
+    log: &RawRailgunLog,
+) -> Result<Vec<DecodedRailgunLogEvent>, RawRailgunLogError> {
+    let decoded = V3AccumulatorStateUpdateLog::decode_log_data(&raw_log_data(log))
+        .map_err(|_| RawRailgunLogError::AbiDecodeFailed("V3 AccumulatorStateUpdate"))?;
+
+    let transaction_hash = raw_transaction_hash(log)?;
+    let block_number = raw_block_number(log)?;
+    let EventV3StateUpdateAbi {
+        commitments,
+        transactions,
+        shields,
+        commitmentCiphertext,
+        treasuryFees,
+        senderCiphertext,
+    } = decoded.update;
+    let split_treasury_fees = split_treasury_fees(&transactions, &shields, &treasuryFees)?;
+
+    let total_unshield_values = transactions.iter().fold(U256::ZERO, |accumulator, transaction| {
+        accumulator + U256::from(transaction.unshieldPreimage.value)
+    });
+    let total_shield_values = shields
+        .iter()
+        .fold(U256::ZERO, |accumulator, shield| accumulator + U256::from(shield.preimage.value));
+
+    let mut events = Vec::new();
+    let mut commitment_start_index = 0_usize;
+    let mut utxo_tree = decoded.accumulatorNumber;
+    let mut utxo_start_position = u32_from_uint(decoded.startPosition, "start_position")?;
+
+    for (transaction_index, transaction) in transactions.into_iter().enumerate() {
+        let commitments_count = usize::from(transaction.commitmentsCount);
+        let commitment_end_index = commitment_start_index + commitments_count;
+        let commitment_hashes = commitments
+            .get(commitment_start_index..commitment_end_index)
+            .ok_or(RawRailgunLogError::MalformedAccumulatorUpdate(
+                "v3 commitment count exceeded commitment hash array",
+            ))?;
+        let commitment_ciphertexts = commitmentCiphertext
+            .get(commitment_start_index..commitment_end_index)
+            .ok_or(RawRailgunLogError::MalformedAccumulatorUpdate(
+                "v3 commitment count exceeded commitment ciphertext array",
+            ))?;
+        let railgun_txid = derive_v3_log_railgun_txid(&transaction, commitment_hashes)?;
+
+        events.push(DecodedRailgunLogEvent::Commitment(decode_commitment_event(
+            DecodedCommitmentEventInput::V3Transact(V3TransactEventInput {
+                transaction_hash: Some(transaction_hash.clone()),
+                block_number: Some(block_number),
+                tree_number: Some(utxo_tree),
+                start_position: Some(utxo_start_position),
+                commitment_hashes: Some(
+                    commitment_hashes.iter().map(|hash| hash.as_slice().to_vec()).collect(),
+                ),
+                commitment_ciphertexts: Some(
+                    commitment_ciphertexts
+                        .iter()
+                        .map(|ciphertext| DecodedV3CommitmentCiphertextInput {
+                            ciphertext: Some(ciphertext.ciphertext.to_vec()),
+                            blinded_sender_viewing_key: Some(
+                                ciphertext.blindedSenderViewingKey.as_slice().to_vec(),
+                            ),
+                            blinded_receiver_viewing_key: Some(
+                                ciphertext.blindedReceiverViewingKey.as_slice().to_vec(),
+                            ),
+                        })
+                        .collect(),
+                ),
+                transact_commitment_batch_start_index: Some(
+                    u32::try_from(commitment_start_index).map_err(|_| {
+                        RawRailgunLogError::ValueOutOfRange("transact_commitment_batch_start_index")
+                    })?,
+                ),
+                sender_ciphertext: Some(senderCiphertext.to_vec()),
+                railgun_txid: Some(railgun_txid_bytes(&railgun_txid)),
+            }),
+        )?));
+
+        events.push(DecodedRailgunLogEvent::Nullifier(decode_nullifier_event(
+            DecodedNullifierEventInput::V3(V3NullifierEventInput {
+                transaction_hash: Some(transaction_hash.clone()),
+                block_number: Some(block_number),
+                spend_tree_number: Some(transaction.spendAccumulatorNumber),
+                nullifiers: Some(
+                    transaction
+                        .nullifiers
+                        .into_iter()
+                        .map(|nullifier| nullifier.as_slice().to_vec())
+                        .collect(),
+                ),
+            }),
+        )?));
+
+        let token_hash = token_hash_from_preimage(&transaction.unshieldPreimage)?;
+        let value = U256::from(transaction.unshieldPreimage.value);
+        if !value.is_zero() {
+            let unshield_fee_total = split_treasury_fees
+                .get(token_hash.as_bytes())
+                .map_or(U256::ZERO, |(_, unshield_fee)| *unshield_fee);
+            let unshield_fee = if total_unshield_values.is_zero() {
+                U256::ZERO
+            } else {
+                unshield_fee_total * value / total_unshield_values
+            };
+            if unshield_fee > value {
+                return Err(RawRailgunLogError::InvalidFeeSplit(
+                    "v3 unshield fee exceeded unshield preimage value",
+                ));
+            }
+            events.push(DecodedRailgunLogEvent::Unshield(decode_unshield_event(
+                DecodedUnshieldEventInput::V3(V3UnshieldEventInput {
+                    transaction_hash: Some(transaction_hash.clone()),
+                    block_number: Some(block_number),
+                    transact_index: Some(
+                        u32::try_from(transaction_index)
+                            .map_err(|_| RawRailgunLogError::ValueOutOfRange("transact_index"))?,
+                    ),
+                    railgun_txid: Some(railgun_txid_bytes(&railgun_txid)),
+                    to_address: Some(transaction.unshieldPreimage.npk.as_slice()[12..].to_vec()),
+                    token_data: Some(event_token_data_input(&transaction.unshieldPreimage.token)),
+                    amount: Some(note_value_bytes_from_u256(value - unshield_fee, "amount")?),
+                    fee: Some(note_value_bytes_from_u256(unshield_fee, "fee")?),
+                }),
+            )?));
+        }
+
+        commitment_start_index = commitment_end_index;
+        utxo_start_position = utxo_start_position
+            .checked_add(u32::from(transaction.commitmentsCount))
+            .ok_or(RawRailgunLogError::ValueOutOfRange("utxo_start_position"))?;
+        if utxo_start_position >= TREE_MAX_ITEMS {
+            utxo_start_position = 0;
+            utxo_tree =
+                utxo_tree.checked_add(1).ok_or(RawRailgunLogError::ValueOutOfRange("utxo_tree"))?;
+        }
+    }
+
+    for shield in shields {
+        let token_hash = token_hash_from_preimage(&shield.preimage)?;
+        let shield_fee_total = split_treasury_fees
+            .get(token_hash.as_bytes())
+            .map_or(U256::ZERO, |(shield_fee, _)| *shield_fee);
+        let shield_value = U256::from(shield.preimage.value);
+        let shield_fee = if total_shield_values.is_zero() {
+            U256::ZERO
+        } else {
+            shield_fee_total * shield_value / total_shield_values
+        };
+
+        events.push(DecodedRailgunLogEvent::Commitment(decode_commitment_event(
+            DecodedCommitmentEventInput::V3Shield(V3ShieldEventInput {
+                transaction_hash: Some(transaction_hash.clone()),
+                block_number: Some(block_number),
+                tree_number: Some(utxo_tree),
+                start_position: Some(utxo_start_position),
+                preimage: Some(event_preimage_input(&shield.preimage)),
+                shield_ciphertext: Some(event_shield_ciphertext_input(&shield.ciphertext)),
+                fee: Some(note_value_bytes_from_u256(shield_fee, "fee")?),
+                from_address: Some(shield.from.as_slice().to_vec()),
+            }),
+        )?));
+
+        utxo_start_position = utxo_start_position
+            .checked_add(1)
+            .ok_or(RawRailgunLogError::ValueOutOfRange("utxo_start_position"))?;
+        if utxo_start_position >= TREE_MAX_ITEMS {
+            utxo_start_position = 0;
+            utxo_tree =
+                utxo_tree.checked_add(1).ok_or(RawRailgunLogError::ValueOutOfRange("utxo_tree"))?;
+        }
+    }
+
+    Ok(events)
+}
+
+/// Decodes one raw Railgun contract log into canonical event models.
+///
+/// V2 logs produce exactly one canonical event. V3 accumulator-update logs may expand into
+/// multiple canonical commitment, nullifier, and unshield events in deterministic order.
+///
+/// # Errors
+///
+/// Returns an error when the topic is unsupported, the ABI payload is malformed, required
+/// receipt context is missing, or canonical event normalization fails.
+pub fn decode_raw_railgun_log(
+    version: RawRailgunLogVersion,
+    log: &RawRailgunLog,
+) -> Result<Vec<DecodedRailgunLogEvent>, RawRailgunLogError> {
+    if log.topics.len() != 1 {
+        return Err(RawRailgunLogError::InvalidTopicCount {
+            expected: 1,
+            actual: log.topics.len(),
+        });
+    }
+
+    let topic = log.topics[0];
+
+    match version {
+        RawRailgunLogVersion::V2 => {
+            if topic == *V2TransactLog::SIGNATURE_HASH.as_slice() {
+                decode_v2_transact_raw_log(log)
+            } else if topic == *V2ShieldLog::SIGNATURE_HASH.as_slice() {
+                decode_v2_shield_raw_log(log)
+            } else if topic == *V2NullifiedLog::SIGNATURE_HASH.as_slice() {
+                decode_v2_nullified_raw_log(log)
+            } else if topic == *V2UnshieldLog::SIGNATURE_HASH.as_slice() {
+                decode_v2_unshield_raw_log(log)
+            } else {
+                Err(RawRailgunLogError::UnsupportedVersionTopic { version, topic })
+            }
+        }
+        RawRailgunLogVersion::V3 => {
+            if topic == *V3AccumulatorStateUpdateLog::SIGNATURE_HASH.as_slice() {
+                decode_v3_accumulator_raw_log(log)
+            } else {
+                Err(RawRailgunLogError::UnsupportedVersionTopic { version, topic })
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::{
+        Address as AlloyAddress, Bytes, FixedBytes, U256,
+        aliases::{U120, U224},
+    };
+    use alloy_sol_types::SolEvent;
     use railgun_types::{
-        CommitmentLeafPosition, GLOBAL_UTXO_POSITION_UNSHIELD_EVENT_HARDCODED_VALUE,
-        GLOBAL_UTXO_TREE_UNSHIELD_EVENT_HARDCODED_VALUE, UtxoLeafCoordinate, UtxoTreeCoordinate,
+        Address, CommitmentLeafPosition, GLOBAL_UTXO_POSITION_UNSHIELD_EVENT_HARDCODED_VALUE,
+        GLOBAL_UTXO_TREE_UNSHIELD_EVENT_HARDCODED_VALUE, TxHash, UtxoLeafCoordinate,
+        UtxoTreeCoordinate,
     };
 
     use super::{
-        DecodedCommitmentEventInput, DecodedShieldCiphertextInput, DecodedShieldPreimageInput,
-        DecodedTokenDataInput, DecodedV2CommitmentCiphertextInput,
-        DecodedV3CommitmentCiphertextInput, EventError, V2NullifierEventInput, V2ShieldEventInput,
-        V2TransactEventInput, V2UnshieldEventInput, V3NullifierEventInput, V3TransactEventInput,
-        V3TransactionEventInput, V3TransactionUnshieldDataInput, V3UnshieldEventInput,
-        decode_commitment_event, decode_v2_nullifier_event, decode_v2_unshield_event,
+        DecodedCommitmentEventInput, DecodedRailgunLogEvent, DecodedShieldCiphertextInput,
+        DecodedShieldPreimageInput, DecodedTokenDataInput, DecodedV2CommitmentCiphertextInput,
+        DecodedV3CommitmentCiphertextInput, EventCommitmentPreimageAbi, EventError,
+        EventShieldCiphertextAbi, EventTokenDataAbi, EventV2CommitmentCiphertextAbi,
+        EventV3CommitmentCiphertextAbi, EventV3ShieldConfigurationAbi, EventV3StateUpdateAbi,
+        EventV3TransactionConfigurationAbi, RawRailgunLog, RawRailgunLogError,
+        RawRailgunLogVersion, V2NullifierEventInput, V2ShieldEventInput, V2TransactEventInput,
+        V2TransactLog, V2UnshieldEventInput, V2UnshieldLog, V3AccumulatorStateUpdateLog,
+        V3NullifierEventInput, V3TransactEventInput, V3TransactionEventInput,
+        V3TransactionUnshieldDataInput, V3UnshieldEventInput, decode_commitment_event,
+        decode_raw_railgun_log, decode_v2_nullifier_event, decode_v2_unshield_event,
         decode_v3_nullifier_event, decode_v3_transaction_event, decode_v3_unshield_event,
     };
 
     fn repeated(byte: u8, len: usize) -> Vec<u8> {
         vec![byte; len]
+    }
+
+    fn tx_hash(byte: u8) -> TxHash {
+        TxHash::new([byte; 32])
+    }
+
+    fn address(byte: u8) -> Address {
+        Address::from_slice(&[byte; 20])
+            .unwrap_or_else(|error| panic!("expected valid test address: {error}"))
+    }
+
+    fn alloy_address(byte: u8) -> AlloyAddress {
+        AlloyAddress::from([byte; 20])
+    }
+
+    fn raw_log(
+        log_data: &alloy_primitives::LogData,
+        transaction_hash_byte: u8,
+        block_number: u64,
+        log_index: Option<u64>,
+    ) -> RawRailgunLog {
+        RawRailgunLog {
+            contract_address: address(0x90),
+            topics: log_data
+                .topics()
+                .iter()
+                .map(|topic| {
+                    topic.as_slice().try_into().unwrap_or_else(|_| panic!("topic must be 32 bytes"))
+                })
+                .collect(),
+            data: log_data.data.to_vec(),
+            transaction_hash: Some(tx_hash(transaction_hash_byte)),
+            block_number: Some(block_number),
+            log_index,
+        }
     }
 
     fn value_bytes(value: u128) -> Vec<u8> {
@@ -1237,6 +2049,240 @@ mod tests {
             event.verification_hash().map(railgun_types::VerificationHash::as_bytes),
             Some(&[0x71; 32])
         );
+    }
+
+    #[test]
+    fn decodes_raw_v2_transact_log_into_canonical_event() {
+        let log = raw_log(
+            &V2TransactLog {
+                treeNumber: U256::ZERO,
+                startPosition: U256::from(1_u8),
+                hash: vec![
+                    FixedBytes::from({
+                        let mut bytes = [0_u8; 32];
+                        bytes[31] = 1;
+                        bytes
+                    }),
+                    FixedBytes::from({
+                        let mut bytes = [0_u8; 32];
+                        bytes[31] = 2;
+                        bytes
+                    }),
+                ],
+                ciphertext: vec![
+                    EventV2CommitmentCiphertextAbi {
+                        ciphertext: [
+                            FixedBytes::from([1_u8; 32]),
+                            FixedBytes::from([2_u8; 32]),
+                            FixedBytes::from([3_u8; 32]),
+                            FixedBytes::from([4_u8; 32]),
+                        ],
+                        blindedSenderViewingKey: FixedBytes::from([5_u8; 32]),
+                        blindedReceiverViewingKey: FixedBytes::from([6_u8; 32]),
+                        annotationData: Bytes::from(vec![7_u8, 8_u8]),
+                        memo: Bytes::from(vec![9_u8, 10_u8]),
+                    },
+                    EventV2CommitmentCiphertextAbi {
+                        ciphertext: [
+                            FixedBytes::from([1_u8; 32]),
+                            FixedBytes::from([2_u8; 32]),
+                            FixedBytes::from([3_u8; 32]),
+                            FixedBytes::from([4_u8; 32]),
+                        ],
+                        blindedSenderViewingKey: FixedBytes::from([5_u8; 32]),
+                        blindedReceiverViewingKey: FixedBytes::from([6_u8; 32]),
+                        annotationData: Bytes::from(vec![7_u8, 8_u8]),
+                        memo: Bytes::from(vec![9_u8, 10_u8]),
+                    },
+                ],
+            }
+            .encode_log_data(),
+            0xaa,
+            99,
+            None,
+        );
+
+        let events = decode_raw_railgun_log(RawRailgunLogVersion::V2, &log)
+            .unwrap_or_else(|error| panic!("raw v2 transact log should decode: {error}"));
+
+        assert_eq!(events.len(), 1);
+        let DecodedRailgunLogEvent::Commitment(railgun_types::VersionedCommitmentEvent::V2(event)) =
+            &events[0]
+        else {
+            panic!("expected one v2 commitment event");
+        };
+        assert_eq!(event.start_position(), CommitmentLeafPosition::new(1));
+        assert_eq!(event.commitments().len(), 2);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn decodes_raw_v3_accumulator_log_into_ordered_canonical_events() {
+        let log = raw_log(
+            &V3AccumulatorStateUpdateLog {
+                update: EventV3StateUpdateAbi {
+                    commitments: vec![FixedBytes::from({
+                        let mut bytes = [0_u8; 32];
+                        bytes[31] = 3;
+                        bytes
+                    })],
+                    transactions: vec![EventV3TransactionConfigurationAbi {
+                        nullifiers: vec![FixedBytes::from({
+                            let mut bytes = [0_u8; 32];
+                            bytes[31] = 4;
+                            bytes
+                        })],
+                        commitmentsCount: 1,
+                        spendAccumulatorNumber: 0,
+                        unshieldPreimage: EventCommitmentPreimageAbi {
+                            npk: FixedBytes::from({
+                                let mut bytes = [0_u8; 32];
+                                bytes[12..].fill(0x41);
+                                bytes
+                            }),
+                            token: EventTokenDataAbi {
+                                tokenType: 0,
+                                tokenAddress: alloy_address(0x11),
+                                tokenSubID: U256::ZERO,
+                            },
+                            value: U120::from(50_u8),
+                        },
+                        boundParamsHash: FixedBytes::from({
+                            let mut bytes = [0_u8; 32];
+                            bytes[31] = 0x51;
+                            bytes
+                        }),
+                    }],
+                    shields: vec![EventV3ShieldConfigurationAbi {
+                        from: alloy_address(0x22),
+                        preimage: EventCommitmentPreimageAbi {
+                            npk: FixedBytes::from({
+                                let mut bytes = [0_u8; 32];
+                                bytes[31] = 12;
+                                bytes
+                            }),
+                            token: EventTokenDataAbi {
+                                tokenType: 0,
+                                tokenAddress: alloy_address(0x11),
+                                tokenSubID: U256::ZERO,
+                            },
+                            value: U120::from(100_u8),
+                        },
+                        ciphertext: EventShieldCiphertextAbi {
+                            encryptedBundle: [
+                                FixedBytes::from([0x21_u8; 32]),
+                                FixedBytes::from([0x22_u8; 32]),
+                                FixedBytes::from({
+                                    let mut bytes = [0_u8; 32];
+                                    bytes[..16].fill(0x23);
+                                    bytes
+                                }),
+                            ],
+                            shieldKey: FixedBytes::from([0x24_u8; 32]),
+                        },
+                    }],
+                    commitmentCiphertext: vec![EventV3CommitmentCiphertextAbi {
+                        ciphertext: Bytes::from(vec![7_u8; 20]),
+                        blindedSenderViewingKey: FixedBytes::from([8_u8; 32]),
+                        blindedReceiverViewingKey: FixedBytes::from([9_u8; 32]),
+                    }],
+                    treasuryFees: Vec::new(),
+                    senderCiphertext: Bytes::from(vec![0xaa_u8, 0xbb_u8]),
+                },
+                accumulatorNumber: 0,
+                startPosition: U224::from(1_u8),
+            }
+            .encode_log_data(),
+            0xee,
+            10,
+            None,
+        );
+
+        let events = decode_raw_railgun_log(RawRailgunLogVersion::V3, &log)
+            .unwrap_or_else(|error| panic!("raw v3 accumulator log should decode: {error}"));
+
+        assert_eq!(events.len(), 4);
+        let DecodedRailgunLogEvent::Commitment(railgun_types::VersionedCommitmentEvent::V3(
+            transact,
+        )) = &events[0]
+        else {
+            panic!("expected first v3 event to be a commitment event");
+        };
+        assert_eq!(transact.start_position(), CommitmentLeafPosition::new(1));
+        assert_eq!(transact.commitments().len(), 1);
+
+        let DecodedRailgunLogEvent::Nullifier(railgun_types::VersionedNullifierEvent::V3(
+            nullifiers,
+        )) = &events[1]
+        else {
+            panic!("expected second v3 event to be a nullifier event");
+        };
+        assert_eq!(nullifiers.nullifiers().len(), 1);
+
+        let DecodedRailgunLogEvent::Unshield(railgun_types::VersionedUnshieldEvent::V3(unshield)) =
+            &events[2]
+        else {
+            panic!("expected third v3 event to be an unshield event");
+        };
+        assert_eq!(unshield.data().amount().get(), 50);
+
+        let DecodedRailgunLogEvent::Commitment(railgun_types::VersionedCommitmentEvent::V3(shield)) =
+            &events[3]
+        else {
+            panic!("expected fourth v3 event to be a shield commitment event");
+        };
+        assert_eq!(shield.start_position(), CommitmentLeafPosition::new(2));
+        assert_eq!(shield.commitments().len(), 1);
+    }
+
+    #[test]
+    fn rejects_raw_log_with_unsupported_topic() {
+        let log = RawRailgunLog {
+            contract_address: address(0x90),
+            topics: vec![[0x99_u8; 32]],
+            data: Vec::new(),
+            transaction_hash: Some(tx_hash(0xaa)),
+            block_number: Some(1),
+            log_index: None,
+        };
+
+        let Err(error) = decode_raw_railgun_log(RawRailgunLogVersion::V2, &log) else {
+            panic!("unsupported topic should fail");
+        };
+
+        assert_eq!(
+            error,
+            RawRailgunLogError::UnsupportedVersionTopic {
+                version: RawRailgunLogVersion::V2,
+                topic: [0x99_u8; 32],
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_raw_v2_unshield_without_log_index() {
+        let log = raw_log(
+            &V2UnshieldLog {
+                to: alloy_address(0x31),
+                token: EventTokenDataAbi {
+                    tokenType: 0,
+                    tokenAddress: alloy_address(0x11),
+                    tokenSubID: U256::ZERO,
+                },
+                amount: U256::from(100_u8),
+                fee: U256::from(1_u8),
+            }
+            .encode_log_data(),
+            0xdd,
+            8,
+            None,
+        );
+
+        let Err(error) = decode_raw_railgun_log(RawRailgunLogVersion::V2, &log) else {
+            panic!("missing v2 unshield log index should fail");
+        };
+
+        assert_eq!(error, RawRailgunLogError::MissingContext("log_index"));
     }
 
     #[test]
