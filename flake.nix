@@ -107,6 +107,14 @@
 
         checks = {
           build = cliPackage;
+          check = craneLib.cargoBuild (
+            workspaceCheckArgs
+            // {
+              pname = "railgun-rs-check";
+              cargoBuildCommand = "cargo check";
+              cargoBuildExtraArgs = "--workspace --all-targets --all-features";
+            }
+          );
           clippy = craneLib.cargoClippy (
             workspaceCheckArgs
             // {
