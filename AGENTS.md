@@ -1,158 +1,69 @@
 # AGENTS.md
 
-This file gives coding agents the operating rules for `railgun-rs`.
+## Project overview
 
-Read these first:
-- `ARCHITECTURE_CONSTITUTION.md`
-- `ARCHITECTURE.md`
-- `CONTRIBUTING.md`
-- `VISION.md`
-- `README.md`
+`railgun-rs` is a modular Rust SDK for the RAILGUN privacy system. It provides shared protocol libraries, thin WASM bindings, and a small CLI built on the same public APIs. The main technologies are Rust, Cargo, and Nix.
 
-If this file conflicts with the architecture constitution, the constitution wins.
+If this file conflicts with `ARCHITECTURE_CONSTITUTION.md`, the constitution wins.
 
-## Repository Summary
+## How to run and build
 
-`railgun-rs` is a modular Rust implementation of the RAILGUN privacy system libraries.
+- Recommended environment: `nix develop`
+- Fetch dependencies: `cargo fetch`
+- Check the workspace: `cargo check`
+- Build the workspace: `cargo build`
+- Build the CLI package: `cargo build -p railgun-cli`
+- Run the CLI locally: `cargo run -p railgun-cli -- --help`
+- Build with pinned Nix config: `nix build .#default`
 
-Current workspace crates:
-- `crates/railgun-types` for shared domain primitives
-- `crates/railgun-core` for shared protocol traits and errors
-- `crates/railgun-wasm` for thin WASM-facing bindings
-- `crates/railgun-cli` for a minimal CLI surface
+## Testing and verification
 
-The repository is still in scaffolding stage. Favor small, architecture-preserving changes.
+- Format: `cargo fmt --all --check`
+- Lint: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- Dependency policy: `cargo deny check`
+- Tests: `cargo test --workspace`
+- Broad final verification: `nix flake check`
 
-## External Rule Files
+Changes are not complete until the smallest relevant crate-level checks pass. Run workspace-level checks for shared changes. Prefer `nix flake check` before finishing broad or cross-cutting work.
 
-This repository currently does not contain `.cursorrules`, `.cursor/rules/`, or `.github/copilot-instructions.md`.
-If any are added later, merge their guidance into your behavior.
+## Project structure
 
-## Architectural Directives
+- `crates/railgun-types/` - shared domain types and validated primitives
+- `crates/railgun-core/` - shared protocol traits, errors, crypto, and core logic
+- `crates/railgun-artifacts/` - proving-artifact metadata and optional downloads
+- `crates/railgun-broadcaster/` - typed broadcaster models and helpers
+- `crates/railgun-poi/` - typed Proof of Innocence models, validation, and optional transports
+- `crates/railgun-prover/` - proving abstractions and helpers
+- `crates/railgun-wasm/` - thin WASM bindings over Rust logic
+- `crates/railgun-cli/` - thin operational CLI using public library APIs
 
-- Keep core crates free of vendor-specific integration dependencies.
-- Put concrete integrations in adapter crates only when real feature work justifies them.
-- Keep `railgun-wasm` thin; do not place protocol logic there.
-- Keep `railgun-cli` thin; it must consume public library APIs.
-- Prefer capability-based abstractions over vendor-shaped traits.
-- Prefer typed domain models over raw strings, bytes, or maps.
-- Keep defaults optional; do not hard-wire one major dependency stack.
-- Do not add new crates unless a real boundary is needed.
-- Every change should clearly belong to domain/core logic, binding logic, CLI/application logic, or future adapter logic.
-- `railgun-types` stays small, stable, and reusable.
-- `railgun-core` owns shared traits, errors, and protocol abstractions.
-- `railgun-wasm` translates Rust APIs for JS/WASM consumers.
-- `railgun-cli` exposes operational commands, not private internals.
+## Code and git workflow
 
-## Build, Lint, And Test Commands
+- Read first: `ARCHITECTURE_CONSTITUTION.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `VISION.md`, `README.md`
+- Make the smallest change that fits the correct architectural layer.
+- Use crate-scoped commands while iterating; use workspace-wide commands when the change is shared.
+- Keep docs in sync when commands, workflow, architecture, or crate boundaries change.
+- Follow repo tooling rather than local style preferences: `rustfmt`, workspace `clippy` lints, and `cargo deny`.
+- No branch naming or commit message convention is documented here; do not invent one.
 
-Run commands from the repository root.
+## Constraints and boundaries
 
-Build:
+- Must preserve layering: `core/domain -> adapters -> bindings/apps`.
+- Must keep vendor-specific integrations out of core crates.
+- Must keep `railgun-wasm` thin; do not move protocol logic into bindings.
+- Must keep `railgun-cli` thin; if the CLI needs new behavior, add it to public library APIs first.
+- Must prefer typed domain models over raw strings, bytes, or maps for protocol concepts.
+- Must use fallible validation at boundaries when invalid input is possible.
+- Must keep defaults optional; do not hard-wire one external stack.
+- Must avoid exposing secrets or privacy-sensitive material through unsafe convenience APIs.
+- Should prefer `core` over `std` in reusable/core code where practical.
+- Should avoid new crates or heavy dependencies unless a real boundary justifies them.
+- Never bypass the architecture constitution to satisfy a task; surface the conflict instead.
 
-```sh
-cargo check
-cargo build
-cargo build -p railgun-cli
-nix build .#default
-```
+## Links to deeper docs
 
-The default Nix package builds the CLI package.
-
-Format and lint:
-
-```sh
-cargo fmt --all
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo deny check
-nix flake check
-```
-
-Workspace lint settings in `Cargo.toml` include `unsafe_code = "forbid"`, `missing_docs = "warn"`, clippy `all`, and clippy `pedantic`. `deny.toml` defines dependency policy. The Nix flake uses `crane` for Rust checks.
-
-Tests:
-
-```sh
-cargo test --workspace
-cargo test -p railgun-core
-cargo test -p railgun-types
-cargo test -p railgun-core test_name -- --exact --nocapture
-cargo test -p railgun-core --test test_file
-cargo test -p railgun-core module_name::test_name
-```
-
-There are currently no tests in the repository, but these are the expected commands once tests exist.
-
-## Local Development Environment
-
-If you use Nix:
-
-```sh
-nix develop
-```
-
-The dev shell provides a pinned Rust toolchain via `fenix` plus `cargo`, `clippy`, `rustfmt`, `rust-analyzer`, `cargo-deny`, `cargo-edit`, `cargo-watch`, and `nixfmt`.
-
-## Rust Version And Edition
-
-- Edition: `2024`
-- MSRV: `1.85`
-
-These are configured in the workspace and `clippy.toml`.
-
-## Code Style Guidelines
-
-- Follow `rustfmt.toml`, `Cargo.toml` workspace lints, `clippy.toml`, and `deny.toml`; prefer enforcing mechanical rules there instead of restating them in docs.
-- Formatting, basic naming, missing `# Errors` docs, `unwrap`/`expect` avoidance, and unused-import hygiene are enforced by tooling.
-- In reusable/core code, prefer `core` over `std` where practical.
-- Public APIs should use domain types, not loose strings or unvalidated bytes.
-- Add dedicated types for protocol concepts when semantic distinction matters.
-- Prefer fallible constructors for validated values and `#[must_use]` where ignoring results is likely a bug.
-- Avoid exposing vendor-specific types from core crates or shaping core APIs around one downstream library.
-- Public docs should explain invariants, validation rules, and the meaning of typed values.
-
-## Dependency, WASM, And CLI Rules
-
-- Do not add heavy ecosystem dependencies to core crates casually.
-- If a dependency represents an integration choice, it likely belongs in a future adapter crate.
-- Keep defaults optional.
-- Keep WASM code as a translation surface over Rust logic.
-- Do not duplicate protocol behavior in `railgun-wasm`.
-- Be explicit about serialization boundaries and JS-facing types.
-- The CLI should remain narrow and operational.
-- If the CLI needs behavior unavailable through public APIs, improve the library first.
-
-## Before Adding Code
-
-Answer these questions first:
-1. Which crate should own this change?
-2. Is this domain logic, binding logic, CLI logic, or future adapter logic?
-3. Does this need a new typed value?
-4. Does this introduce a dependency into the correct layer?
-5. Will this design still make sense for Rust, WASM, and CLI consumers?
-
-If the answer is unclear, refine the design before implementing.
-
-## Expected Validation Before Finishing
-
-Run the smallest relevant set, then prefer the full set for broader changes:
-
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo check
-cargo deny check
-nix flake check
-```
-
-If you add tests, also run the smallest relevant `cargo test` command and then `cargo test --workspace` when reasonable.
-
-## Agent Behavior Summary
-
-- Make minimal changes that preserve architecture.
-- Prefer typed, validated APIs.
-- Keep core code portable and vendor-neutral.
-- Keep WASM and CLI thin.
-- Update docs when architecture or conventions change.
-- Do not invent abstractions or crates before actual feature work justifies them.
+- `ARCHITECTURE_CONSTITUTION.md` - binding architectural rules
+- `ARCHITECTURE.md` - workspace layering and crate responsibilities
+- `CONTRIBUTING.md` - contribution flow and dependency guidance
+- `VISION.md` - goals and non-goals
+- `README.md` - current workspace status and CLI usage

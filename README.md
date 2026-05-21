@@ -56,6 +56,8 @@ This repository includes a Nix development environment in `flake.nix`.
 
 The flake now uses `crane` for Rust builds and checks while keeping a pinned Rust toolchain in the development shell.
 
+For the closest match to CI-style local results, run Rust commands inside `nix develop`.
+
 Basic validation:
 
 ```sh
@@ -71,6 +73,8 @@ Local Nix validation from the working tree:
 nix flake check
 nix build .#default
 ```
+
+`nix flake check` currently covers the pinned-toolchain equivalents of `cargo fmt --all --check`, `cargo check --workspace --all-targets --all-features`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace`, and `cargo deny check`, plus the CLI package build.
 
 ## CLI
 
