@@ -15,6 +15,7 @@ mod note;
 mod position;
 mod proof;
 mod railgun_txid;
+mod receipt;
 mod shield_ciphertext;
 mod token;
 mod transaction;
@@ -66,6 +67,10 @@ pub use position::{
 };
 pub use proof::Groth16Proof;
 pub use railgun_txid::{RAILGUN_TXID_INPUTS_LENGTH, RailgunTxid, VerificationHash};
+pub use receipt::{
+    PublicRailgunEventKind, PublicRailgunTransactionSummary, RawTransactionReceipt,
+    TransactionReceiptStatus,
+};
 pub use shield_ciphertext::{ShieldCiphertext, ShieldCiphertextBlock};
 pub use token::{Address, ChainId, TokenData, TokenHash, TokenSubId, TokenType, TxHash};
 pub use transaction::{

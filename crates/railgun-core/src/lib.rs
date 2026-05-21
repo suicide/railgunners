@@ -19,6 +19,7 @@ pub mod note;
 /// Canonical UTXO and txid position helpers.
 pub mod position;
 pub mod railgun_txid;
+pub mod receipt;
 pub mod shareable_viewing_key;
 pub mod shared_key;
 pub mod shield_ciphertext;
@@ -94,6 +95,7 @@ pub use railgun_txid::{
     RailgunTxidError, derive_commitments_hash, derive_nullifiers_hash, derive_railgun_txid,
     derive_railgun_txid_leaf_hash, derive_verification_hash,
 };
+pub use receipt::{ReceiptInspectionError, ReceiptPublicOutcome, inspect_public_railgun_receipt};
 pub use shareable_viewing_key::{
     ShareableViewingKeyError, decode_shareable_viewing_key, encode_shareable_viewing_key,
     pack_spending_public_key, unpack_spending_public_key,
