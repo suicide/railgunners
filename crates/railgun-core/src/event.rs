@@ -1159,11 +1159,7 @@ fn event_shield_ciphertext_input(
 ) -> DecodedShieldCiphertextInput {
     DecodedShieldCiphertextInput {
         encrypted_bundle: Some(
-            ciphertext
-                .encryptedBundle
-                .iter()
-                .map(|word| word.as_slice().to_vec())
-                .collect(),
+            ciphertext.encryptedBundle.iter().map(|word| word.as_slice().to_vec()).collect(),
         ),
         shield_key: Some(ciphertext.shieldKey.as_slice().to_vec()),
     }
@@ -1266,8 +1262,7 @@ fn derive_v3_log_railgun_txid(
     let bound_params_hash = parse_bound_params_hash(transaction.boundParamsHash.as_slice())?;
 
     if transaction.unshieldPreimage.value > 0 {
-        let preimage =
-            parse_shield_preimage(event_preimage_input(&transaction.unshieldPreimage))?;
+        let preimage = parse_shield_preimage(event_preimage_input(&transaction.unshieldPreimage))?;
         commitments.push(derive_shield_event_commitment(&preimage)?);
     }
 
