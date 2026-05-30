@@ -347,8 +347,9 @@ mod tests {
         let data_json = serde_json::to_string(&data)
             .unwrap_or_else(|error| panic!("test fee data should serialize: {error}"));
         let encoded_data = format!("0x{}", hex::encode(data_json.as_bytes()));
-        let signature =
-            SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
+        let decoded_data = hex::decode(encoded_data.trim_start_matches("0x"))
+            .unwrap_or_else(|error| panic!("data hex should decode: {error}"));
+        let signature = SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(&decoded_data);
 
         parse_fee_message_payload(
             &serde_json::json!({

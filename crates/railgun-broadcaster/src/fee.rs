@@ -361,8 +361,8 @@ pub fn sign_fee_message(
     viewing_private_key: &ViewingPrivateKey,
 ) -> Result<BroadcasterFeeMessage, BroadcasterError> {
     let encoded_data = serialize_fee_message_data(data)?;
-    let signature =
-        SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
+    let decoded_data = decode_hex(&encoded_data)?;
+    let signature = SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(&decoded_data);
 
     Ok(BroadcasterFeeMessage::new(
         data.clone(),
@@ -373,8 +373,9 @@ pub fn sign_fee_message(
 
 /// Verifies the broadcaster fee-message signature against the broadcaster identity.
 ///
-/// The signed bytes are the exact canonical `data` string bytes carried by the
-/// envelope, matching upstream broadcaster behavior.
+/// The signed bytes are the decoded bytes represented by the canonical hex
+/// `data` string carried by the envelope, matching upstream broadcaster
+/// behavior.
 ///
 /// # Errors
 ///
@@ -389,8 +390,9 @@ pub fn verify_fee_message_signature(
         BroadcasterError::InvalidFeeMessageField("railgunAddress viewing key is invalid")
     })?;
     let signature = decode_signature(message.signature())?;
+    let decoded_data = decode_hex(message.encoded_data())?;
     verifying_key
-        .verify(message.encoded_data().as_bytes(), &signature)
+        .verify(&decoded_data, &signature)
         .map_err(|_| BroadcasterError::InvalidFeeMessageSignatureVerification)
 }
 
@@ -436,9 +438,9 @@ mod tests {
 
     use super::{
         BroadcasterError, BroadcasterFeeMessageData, BroadcasterFeeMessageDataFields,
-        BroadcasterFeeMessageDataWire, parse_fee_message_data, parse_fee_message_payload,
-        serialize_fee_message_data, sign_fee_message, validate_fee_message,
-        validate_fee_message_at, verify_fee_message_signature,
+        BroadcasterFeeMessageDataWire, decode_hex, parse_fee_message_data,
+        parse_fee_message_payload, serialize_fee_message_data, sign_fee_message,
+        validate_fee_message, validate_fee_message_at, verify_fee_message_signature,
     };
     use crate::serialize_fee_message_payload;
 
@@ -482,8 +484,9 @@ mod tests {
         let data = sample_fee_message_data();
         let encoded_data = serialize_fee_message_data(&data)
             .unwrap_or_else(|error| panic!("test fee data should serialize: {error}"));
-        let signature =
-            SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(encoded_data.as_bytes());
+        let decoded_data = decode_hex(&encoded_data)
+            .unwrap_or_else(|error| panic!("data hex should decode: {error}"));
+        let signature = SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(&decoded_data);
 
         serde_json::json!({
             "data": encoded_data,
@@ -641,6 +644,27 @@ mod tests {
 
         assert_eq!(first.encoded_data(), second.encoded_data());
         assert_eq!(first.signature(), second.signature());
+    }
+
+    #[test]
+    fn sign_fee_message_matches_manual_decoded_byte_signing() {
+        let viewing_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let data = sample_fee_message_data();
+        let encoded_data = serialize_fee_message_data(&data)
+            .unwrap_or_else(|error| panic!("fee data should serialize: {error}"));
+        let decoded_data = decode_hex(&encoded_data)
+            .unwrap_or_else(|error| panic!("data hex should decode: {error}"));
+        let expected_signature =
+            SigningKey::from_bytes(viewing_private_key.as_bytes()).sign(&decoded_data);
+
+        let message = sign_fee_message(&data, &viewing_private_key)
+            .unwrap_or_else(|error| panic!("fee message should sign: {error}"));
+
+        assert_eq!(message.encoded_data(), encoded_data);
+        assert_eq!(
+            message.signature(),
+            format!("0x{}", hex::encode(expected_signature.to_bytes()))
+        );
     }
 
     #[test]
