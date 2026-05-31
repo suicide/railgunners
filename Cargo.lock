@@ -2001,6 +2001,7 @@ version = "0.1.0"
 dependencies = [
  "bech32",
  "num-bigint",
+ "sha3",
 ]
 
 [[package]]

@@ -310,6 +310,8 @@ mod tests {
         version: String,
         #[serde(rename = "relayAdapt")]
         relay_adapt: String,
+        #[serde(rename = "relayAdapt7702", skip_serializing_if = "Option::is_none")]
+        relay_adapt_7702: Option<String>,
         #[serde(rename = "requiredPOIListKeys")]
         required_poi_list_keys: Vec<String>,
         reliability: f64,
@@ -338,7 +340,8 @@ mod tests {
             identifier: Some("test-broadcaster".to_owned()),
             available_wallets: 4,
             version: "0.1.0".to_owned(),
-            relay_adapt: "0x1111111111111111111111111111111111111111".to_owned(),
+            relay_adapt: "0xac9f360ae85469b27aeddeafc579ef2d052ad405".to_owned(),
+            relay_adapt_7702: Some("0x1111111111111111111111111111111111111111".to_owned()),
             required_poi_list_keys: vec![
                 "efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88".to_owned(),
             ],
@@ -370,6 +373,14 @@ mod tests {
             .unwrap_or_else(|error| panic!("fee message should parse: {error}"));
 
         assert_eq!(reparsed, payload);
+        assert_eq!(
+            reparsed.data().relay_adapt().to_string(),
+            "0xAc9f360Ae85469B27aEDdEaFC579Ef2d052aD405"
+        );
+        assert_eq!(
+            reparsed.data().relay_adapt_7702().map(ToString::to_string),
+            Some("0x1111111111111111111111111111111111111111".to_owned())
+        );
     }
 
     #[test]

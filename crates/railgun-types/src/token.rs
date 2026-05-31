@@ -1,4 +1,45 @@
+use core::fmt;
+
+use sha3::{Digest, Keccak256};
+
 use crate::ParseDomainError;
+
+fn decode_hex_nibble(value: u8) -> Result<u8, ParseDomainError> {
+    match value {
+        b'0'..=b'9' => Ok(value - b'0'),
+        b'a'..=b'f' => Ok(value - b'a' + 10),
+        b'A'..=b'F' => Ok(value - b'A' + 10),
+        _ => Err(ParseDomainError::new("address must be valid hex")),
+    }
+}
+
+fn encode_lower_hex(bytes: &[u8]) -> [u8; Address::LENGTH * 2] {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let mut encoded = [0_u8; Address::LENGTH * 2];
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        encoded[index * 2] = HEX[usize::from(byte >> 4)];
+        encoded[index * 2 + 1] = HEX[usize::from(byte & 0x0f)];
+    }
+    encoded
+}
+
+fn checksum_encoded_address(address: &Address) -> [u8; Address::LENGTH * 2] {
+    let lowercase = encode_lower_hex(address.as_bytes());
+    let hash = Keccak256::digest(lowercase);
+    let mut encoded = lowercase;
+
+    for (index, byte) in encoded.iter_mut().enumerate() {
+        if byte.is_ascii_hexdigit() && byte.is_ascii_lowercase() {
+            let nibble = if index % 2 == 0 { hash[index / 2] >> 4 } else { hash[index / 2] & 0x0f };
+            if nibble >= 8 {
+                *byte = byte.to_ascii_uppercase();
+            }
+        }
+    }
+
+    encoded
+}
 
 /// Typed EVM address.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -26,10 +67,69 @@ impl Address {
         Ok(Self::new(array))
     }
 
+    /// Parses an EVM address from a `0x`-prefixed hex string.
+    ///
+    /// Parsing is case-insensitive. Serialization remains canonical EIP-55.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `value` is not a `0x`-prefixed 20-byte hex string.
+    pub fn parse(value: &str) -> Result<Self, ParseDomainError> {
+        let trimmed =
+            value.strip_prefix("0x").ok_or(ParseDomainError::new("address must start with 0x"))?;
+        if trimmed.len() != Self::LENGTH * 2 {
+            return Err(ParseDomainError::new("address must be exactly 20 bytes"));
+        }
+
+        let bytes = trimmed.as_bytes();
+        let mut decoded = [0_u8; Self::LENGTH];
+        for index in 0..Self::LENGTH {
+            let high = decode_hex_nibble(bytes[index * 2])?;
+            let low = decode_hex_nibble(bytes[index * 2 + 1])?;
+            decoded[index] = (high << 4) | low;
+        }
+
+        Ok(Self::new(decoded))
+    }
+
     /// Returns the raw address bytes.
     #[must_use]
     pub const fn as_bytes(&self) -> &[u8; Self::LENGTH] {
         &self.0
+    }
+
+    /// Returns the canonical EIP-55 checksum string.
+    #[must_use]
+    pub fn to_checksum_string(&self) -> String {
+        let encoded = checksum_encoded_address(self);
+        let mut output = String::with_capacity(2 + encoded.len());
+        output.push_str("0x");
+        for byte in encoded {
+            output.push(char::from(byte));
+        }
+        output
+    }
+}
+
+impl fmt::Display for Address {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.to_checksum_string())
+    }
+}
+
+impl TryFrom<&str> for Address {
+    type Error = ParseDomainError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::parse(value)
+    }
+}
+
+impl TryFrom<String> for Address {
+    type Error = ParseDomainError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
     }
 }
 
@@ -249,12 +349,46 @@ mod tests {
     use super::{Address, ParseDomainError, TokenData, TokenSubId, TokenType};
 
     #[test]
+    fn parses_lowercase_address_and_serializes_to_checksum() {
+        let address = Address::parse("0xac9f360ae85469b27aeddeafc579ef2d052ad405")
+            .unwrap_or_else(|error| panic!("address should parse: {error}"));
+
+        assert_eq!(address.to_string(), "0xAc9f360Ae85469B27aEDdEaFC579Ef2d052aD405");
+    }
+
+    #[test]
+    fn parses_checksum_address() {
+        let address = Address::parse("0xAc9f360Ae85469B27aEDdEaFC579Ef2d052aD405")
+            .unwrap_or_else(|error| panic!("address should parse: {error}"));
+
+        assert_eq!(address.to_string(), "0xAc9f360Ae85469B27aEDdEaFC579Ef2d052aD405");
+    }
+
+    #[test]
     fn rejects_invalid_address_length() {
         let Err(error) = Address::from_slice(&[7_u8; 19]) else {
             panic!("invalid address length should fail");
         };
 
         assert_eq!(error, ParseDomainError::new("address must be exactly 20 bytes"));
+    }
+
+    #[test]
+    fn rejects_address_without_prefix() {
+        let Err(error) = Address::parse("ac9f360ae85469b27aeddeafc579ef2d052ad405") else {
+            panic!("missing 0x prefix should fail");
+        };
+
+        assert_eq!(error, ParseDomainError::new("address must start with 0x"));
+    }
+
+    #[test]
+    fn rejects_invalid_address_hex() {
+        let Err(error) = Address::parse("0xzz9f360ae85469b27aeddeafc579ef2d052ad405") else {
+            panic!("invalid hex should fail");
+        };
+
+        assert_eq!(error, ParseDomainError::new("address must be valid hex"));
     }
 
     #[test]

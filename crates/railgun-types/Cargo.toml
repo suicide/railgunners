@@ -13,3 +13,4 @@ workspace = true
 [dependencies]
 bech32.workspace = true
 num-bigint.workspace = true
+sha3 = "0.10.8"
