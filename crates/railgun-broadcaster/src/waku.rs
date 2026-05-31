@@ -357,7 +357,7 @@ mod tests {
         parse_fee_message_payload(
             &serde_json::json!({
                 "data": encoded_data,
-                "signature": format!("0x{}", hex::encode(signature.to_bytes())),
+                "signature": hex::encode(signature.to_bytes()),
             })
             .to_string(),
         )

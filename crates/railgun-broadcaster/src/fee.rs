@@ -396,7 +396,7 @@ pub fn sign_fee_message(
     Ok(BroadcasterFeeMessage::new(
         data.clone(),
         encoded_data,
-        format!("0x{}", hex::encode(signature.to_bytes())),
+        hex::encode(signature.to_bytes()),
     ))
 }
 
@@ -524,7 +524,7 @@ mod tests {
 
         serde_json::json!({
             "data": encoded_data,
-            "signature": format!("0x{}", hex::encode(signature.to_bytes())),
+            "signature": hex::encode(signature.to_bytes()),
         })
         .to_string()
     }
@@ -677,6 +677,23 @@ mod tests {
 
         verify_fee_message_signature(&message)
             .unwrap_or_else(|error| panic!("signature should verify: {error}"));
+    }
+
+    #[test]
+    fn verifies_fee_message_signature_with_prefixed_wire_signature() {
+        let payload = sample_fee_message_json();
+        let mut value: serde_json::Value = serde_json::from_str(&payload)
+            .unwrap_or_else(|error| panic!("test payload should parse: {error}"));
+        let signature = value["signature"]
+            .as_str()
+            .unwrap_or_else(|| panic!("signature should be a string"));
+        value["signature"] = serde_json::Value::String(format!("0x{signature}"));
+
+        let message = parse_fee_message_payload(&value.to_string())
+            .unwrap_or_else(|error| panic!("prefixed fee message should parse: {error}"));
+
+        verify_fee_message_signature(&message)
+            .unwrap_or_else(|error| panic!("prefixed signature should verify: {error}"));
     }
 
     #[test]
@@ -835,6 +852,21 @@ mod tests {
     }
 
     #[test]
+    fn sign_fee_message_emits_unprefixed_hex_fields() {
+        let viewing_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let message = sign_fee_message(&sample_fee_message_data(), &viewing_private_key)
+            .unwrap_or_else(|error| panic!("fee message should sign: {error}"));
+
+        assert!(!message.encoded_data().starts_with("0x"));
+        assert!(!message.signature().starts_with("0x"));
+        assert_eq!(message.signature().len(), 128);
+        hex::decode(message.encoded_data())
+            .unwrap_or_else(|error| panic!("data should be plain hex: {error}"));
+        hex::decode(message.signature())
+            .unwrap_or_else(|error| panic!("signature should be plain hex: {error}"));
+    }
+
+    #[test]
     fn sign_fee_message_matches_manual_decoded_byte_signing() {
         let viewing_private_key = ViewingPrivateKey::new([7_u8; 32]);
         let data = sample_fee_message_data();
@@ -849,10 +881,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("fee message should sign: {error}"));
 
         assert_eq!(message.encoded_data(), encoded_data);
-        assert_eq!(
-            message.signature(),
-            format!("0x{}", hex::encode(expected_signature.to_bytes()))
-        );
+        assert_eq!(message.signature(), hex::encode(expected_signature.to_bytes()));
     }
 
     #[test]
