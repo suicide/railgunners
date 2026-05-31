@@ -23,6 +23,7 @@ struct BroadcasterFeeMessageDataWire {
     fees_id: String,
     #[serde(rename = "railgunAddress")]
     railgun_address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     identifier: Option<String>,
     #[serde(rename = "availableWallets")]
     available_wallets: u64,
@@ -617,6 +618,36 @@ mod tests {
             .unwrap_or_else(|error| panic!("second serialization should succeed: {error}"));
 
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn omits_identifier_when_unset_during_serialization() {
+        let sample = sample_fee_message_data();
+        let data = BroadcasterFeeMessageData::new(BroadcasterFeeMessageDataFields {
+            fees: sample.fees().clone(),
+            fee_expiration: sample.fee_expiration(),
+            fees_id: sample.fees_id().to_owned(),
+            railgun_address: sample.railgun_address().clone(),
+            identifier: None,
+            available_wallets: sample.available_wallets(),
+            version: sample.version().to_owned(),
+            relay_adapt: sample.relay_adapt().to_owned(),
+            required_poi_list_keys: sample.required_poi_list_keys().to_vec(),
+            reliability: sample.reliability(),
+        })
+        .unwrap_or_else(|error| panic!("test fee data should construct: {error}"));
+
+        let encoded_data = serialize_fee_message_data(&data)
+            .unwrap_or_else(|error| panic!("fee data should serialize: {error}"));
+        let decoded_data = String::from_utf8(
+            decode_hex(&encoded_data)
+                .unwrap_or_else(|error| panic!("data hex should decode: {error}")),
+        )
+        .unwrap_or_else(|error| panic!("decoded data should be utf8: {error}"));
+        let value: serde_json::Value = serde_json::from_str(&decoded_data)
+            .unwrap_or_else(|error| panic!("decoded data should be valid json: {error}"));
+
+        assert!(value.get("identifier").is_none());
     }
 
     #[test]
