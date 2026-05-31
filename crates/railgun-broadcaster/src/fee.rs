@@ -196,7 +196,7 @@ impl BroadcasterFeeMessage {
         &self.data
     }
 
-    /// Returns the exact canonical hex-encoded fee-message data string.
+    /// Returns the exact fee-message data hex string carried by the envelope.
     #[must_use]
     pub fn encoded_data(&self) -> &str {
         &self.encoded_data
@@ -366,8 +366,8 @@ pub fn parse_fee_message_payload(payload: &str) -> Result<BroadcasterFeeMessage,
     Ok(BroadcasterFeeMessage::new(data, encoded_data, signature))
 }
 
-/// Serializes canonical broadcaster fee-message data into the exact hex-encoded
-/// UTF-8 JSON string used as signing input.
+/// Serializes canonical broadcaster fee-message data into the exact unprefixed
+/// hex-encoded UTF-8 JSON string used as signing input.
 ///
 /// # Errors
 ///
@@ -377,7 +377,7 @@ pub fn serialize_fee_message_data(
 ) -> Result<String, BroadcasterError> {
     let json = serde_json::to_string(&BroadcasterFeeMessageDataWire::from(data))
         .map_err(|_| BroadcasterError::InvalidFeeMessageDataJson)?;
-    Ok(format!("0x{}", hex::encode(json.as_bytes())))
+    Ok(hex::encode(json.as_bytes()))
 }
 
 /// Signs canonical broadcaster fee-message data into a typed fee-message envelope.
@@ -570,6 +570,26 @@ mod tests {
     }
 
     #[test]
+    fn serializes_fee_message_data_without_0x_prefix() {
+        let encoded_data = serialize_fee_message_data(&sample_fee_message_data())
+            .unwrap_or_else(|error| panic!("fee data should serialize: {error}"));
+
+        assert!(!encoded_data.starts_with("0x"));
+    }
+
+    #[test]
+    fn serialized_fee_message_data_decodes_with_plain_hex_logic() {
+        let encoded_data = serialize_fee_message_data(&sample_fee_message_data())
+            .unwrap_or_else(|error| panic!("fee data should serialize: {error}"));
+        let decoded_data = hex::decode(&encoded_data)
+            .unwrap_or_else(|error| panic!("data hex should decode without trimming: {error}"));
+        let value: serde_json::Value = serde_json::from_slice(&decoded_data)
+            .unwrap_or_else(|error| panic!("decoded data should be valid json: {error}"));
+
+        assert_eq!(value["feesID"], "fees-cache-id");
+    }
+
+    #[test]
     fn parses_lowercase_wire_addresses_and_canonicalizes_them() {
         let mut data: BroadcasterFeeMessageDataWire = serde_json::from_str(
             &String::from_utf8(
@@ -602,6 +622,20 @@ mod tests {
             parsed.relay_adapt_7702().map(ToString::to_string),
             Some("0x1111111111111111111111111111111111111111".to_owned())
         );
+    }
+
+    #[test]
+    fn parses_prefixed_and_unprefixed_fee_message_data() {
+        let encoded_data = serialize_fee_message_data(&sample_fee_message_data())
+            .unwrap_or_else(|error| panic!("fee data should serialize: {error}"));
+        let prefixed = format!("0x{encoded_data}");
+
+        let parsed_unprefixed = parse_fee_message_data(&encoded_data)
+            .unwrap_or_else(|error| panic!("unprefixed data should parse: {error}"));
+        let parsed_prefixed = parse_fee_message_data(&prefixed)
+            .unwrap_or_else(|error| panic!("prefixed data should parse: {error}"));
+
+        assert_eq!(parsed_unprefixed, parsed_prefixed);
     }
 
     #[test]
