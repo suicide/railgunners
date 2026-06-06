@@ -8,7 +8,8 @@ mod waku;
 
 pub use encrypt::{
     BroadcasterDecryptedTransactCommon, decrypt_transact_common_envelope,
-    encrypt_transact_common_payload, encrypt_transact_common_payload_with_ephemeral_key,
+    decrypt_transact_common_envelope_plaintext, encrypt_transact_common_payload,
+    encrypt_transact_common_payload_with_ephemeral_key,
 };
 pub use error::BroadcasterError;
 pub use fee::{

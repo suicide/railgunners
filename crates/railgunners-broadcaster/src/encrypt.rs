@@ -212,6 +212,25 @@ pub fn encrypt_transact_common_payload_with_ephemeral_key(
     )
 }
 
+/// Decrypts a canonical broadcaster transact envelope into its plaintext JSON
+/// without parsing the COMMON payload.
+///
+/// # Errors
+///
+/// Returns an error if the envelope public key or encrypted tuple is malformed,
+/// shared-key derivation fails, decryption fails, or the decrypted plaintext is
+/// not valid UTF-8.
+pub fn decrypt_transact_common_envelope_plaintext(
+    broadcaster_viewing_private_key: &ViewingPrivateKey,
+    envelope: &BroadcasterTransactEnvelope,
+) -> Result<String, BroadcasterError> {
+    let shared_key = derive_transact_shared_key_for_decryption(
+        broadcaster_viewing_private_key,
+        envelope.pubkey(),
+    )?;
+    decrypt_json_payload(envelope.encrypted_data(), &shared_key)
+}
+
 /// Decrypts a canonical broadcaster transact envelope into its plaintext JSON and
 /// typed COMMON transact payload.
 ///
@@ -224,11 +243,8 @@ pub fn decrypt_transact_common_envelope(
     broadcaster_viewing_private_key: &ViewingPrivateKey,
     envelope: &BroadcasterTransactEnvelope,
 ) -> Result<BroadcasterDecryptedTransactCommon, BroadcasterError> {
-    let shared_key = derive_transact_shared_key_for_decryption(
-        broadcaster_viewing_private_key,
-        envelope.pubkey(),
-    )?;
-    let plaintext = decrypt_json_payload(envelope.encrypted_data(), &shared_key)?;
+    let plaintext =
+        decrypt_transact_common_envelope_plaintext(broadcaster_viewing_private_key, envelope)?;
     let payload = parse_transact_common_payload(&plaintext)?;
 
     Ok(BroadcasterDecryptedTransactCommon::new(plaintext, payload))
@@ -254,8 +270,9 @@ mod tests {
 
     use super::{
         IV_LENGTH, TAG_LENGTH, decrypt_transact_common_envelope,
-        derive_transact_shared_key_for_decryption, ed25519_private_scalar, encrypt_json_payload,
-        encrypt_transact_common_payload, encrypt_transact_common_payload_with_ephemeral_key,
+        decrypt_transact_common_envelope_plaintext, derive_transact_shared_key_for_decryption,
+        ed25519_private_scalar, encrypt_json_payload, encrypt_transact_common_payload,
+        encrypt_transact_common_payload_with_ephemeral_key,
         encrypt_transact_common_payload_with_ephemeral_key_and_iv,
     };
     use crate::{
@@ -596,5 +613,96 @@ mod tests {
         };
 
         assert_eq!(error, BroadcasterError::InvalidTransactPayloadJson);
+    }
+
+    #[test]
+    fn decrypt_plaintext_round_trips_encrypted_common_payload() {
+        let broadcaster_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let broadcaster_public_key = derive_viewing_public_key(&broadcaster_private_key);
+        let payload = sample_payload();
+        let serialized = serialize_transact_common_payload(&payload)
+            .unwrap_or_else(|error| panic!("payload should serialize: {error}"));
+        let envelope = encrypt_transact_common_payload_with_ephemeral_key_and_iv(
+            &broadcaster_public_key,
+            &payload,
+            &ViewingPrivateKey::new([9_u8; 32]),
+            [11_u8; IV_LENGTH],
+        )
+        .unwrap_or_else(|error| panic!("payload should encrypt: {error}"));
+
+        let plaintext =
+            decrypt_transact_common_envelope_plaintext(&broadcaster_private_key, &envelope)
+                .unwrap_or_else(|error| panic!("should decrypt: {error}"));
+
+        assert_eq!(plaintext, serialized);
+    }
+
+    #[test]
+    fn decrypt_plaintext_rejects_wrong_private_key() {
+        let broadcaster_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let broadcaster_public_key = derive_viewing_public_key(&broadcaster_private_key);
+        let envelope = encrypt_transact_common_payload_with_ephemeral_key_and_iv(
+            &broadcaster_public_key,
+            &sample_payload(),
+            &ViewingPrivateKey::new([9_u8; 32]),
+            [11_u8; IV_LENGTH],
+        )
+        .unwrap_or_else(|error| panic!("payload should encrypt: {error}"));
+
+        let Err(error) = decrypt_transact_common_envelope_plaintext(
+            &ViewingPrivateKey::new([8_u8; 32]),
+            &envelope,
+        ) else {
+            panic!("wrong private key should fail");
+        };
+
+        assert_eq!(error, BroadcasterError::TransactDecryptionFailed);
+    }
+
+    #[test]
+    fn decrypt_plaintext_rejects_malformed_encrypted_tuple() {
+        let envelope = BroadcasterTransactEnvelope::new(
+            derive_viewing_public_key(&ViewingPrivateKey::new([9_u8; 32])),
+            BroadcasterEncryptedData::new(["0x1234".to_owned(), "0x00".to_owned()]),
+        );
+
+        let Err(error) = decrypt_transact_common_envelope_plaintext(
+            &ViewingPrivateKey::new([7_u8; 32]),
+            &envelope,
+        ) else {
+            panic!("malformed encrypted tuple should fail");
+        };
+
+        assert_eq!(
+            error,
+            BroadcasterError::InvalidTransactEnvelopeEncryptedData(
+                "broadcaster transact encryptedData[0] must contain 16-byte iv and 16-byte tag",
+            )
+        );
+    }
+
+    #[test]
+    fn decrypt_plaintext_rejects_invalid_utf8_plaintext() {
+        let broadcaster_private_key = ViewingPrivateKey::new([7_u8; 32]);
+        let ephemeral_private_key = ViewingPrivateKey::new([9_u8; 32]);
+        let ephemeral_public_key = derive_viewing_public_key(&ephemeral_private_key);
+        let shared_key = derive_transact_shared_key_for_decryption(
+            &broadcaster_private_key,
+            &ephemeral_public_key,
+        )
+        .unwrap_or_else(|error| panic!("shared key should derive: {error}"));
+
+        // Encrypt arbitrary bytes that are not valid UTF-8.
+        let encrypted_data = encrypt_json_payload(&[0xFF, 0xFE], &shared_key, [11_u8; IV_LENGTH])
+            .unwrap_or_else(|error| panic!("should encrypt: {error}"));
+        let envelope = BroadcasterTransactEnvelope::new(ephemeral_public_key, encrypted_data);
+
+        let Err(error) =
+            decrypt_transact_common_envelope_plaintext(&broadcaster_private_key, &envelope)
+        else {
+            panic!("invalid UTF-8 should fail");
+        };
+
+        assert_eq!(error, BroadcasterError::InvalidTransactPayloadUtf8);
     }
 }
