@@ -1,0 +1,18 @@
+[package]
+name = "railgunners-prover"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+num-bigint.workspace = true
+railgunners-artifacts.workspace = true
+railgunners-core.workspace = true
+railgunners-types.workspace = true
+serde_json = "1.0.145"

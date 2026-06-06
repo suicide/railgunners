@@ -1,6 +1,6 @@
-# railgun-rs
+# railgunners
 
-`railgun-rs` is a modular Rust implementation of the RAILGUN privacy system libraries.
+`railgunners` is a modular Rust implementation of the RAILGUN privacy system libraries.
 
 The project is intended to support developers building wallets and other applications that interact with RAILGUN smart contracts and surrounding infrastructure such as broadcasters and the Proof of Innocence system.
 
@@ -34,14 +34,14 @@ Current note-modeling behavior includes sender-visibility rules used during note
 
 The current workspace includes:
 
-- `crates/railgun-artifacts` for proving-artifact metadata and optional downloads
-- `crates/railgun-broadcaster` for typed broadcaster-facing models and helpers
-- `crates/railgun-poi` for typed Proof of Innocence models, validation, and optional transports
-- `crates/railgun-prover` for proving-oriented abstractions and helpers
-- `crates/railgun-types` for shared domain primitives
-- `crates/railgun-core` for shared protocol traits and errors
-- `crates/railgun-wasm` for thin WASM-oriented bindings
-- `crates/railgun-cli` for a minimal command-line interface
+- `crates/railgunners-artifacts` for proving-artifact metadata and optional downloads
+- `crates/railgunners-broadcaster` for typed broadcaster-facing models and helpers
+- `crates/railgunners-poi` for typed Proof of Innocence models, validation, and optional transports
+- `crates/railgunners-prover` for proving-oriented abstractions and helpers
+- `crates/railgunners-types` for shared domain primitives
+- `crates/railgunners-core` for shared protocol traits and errors
+- `crates/railgunners-wasm` for thin WASM-oriented bindings
+- `crates/railgunners-cli` for a minimal command-line interface
 
 ## Project Docs
 
@@ -78,16 +78,16 @@ nix build .#default
 
 ## CLI
 
-The workspace includes a small offline-first CLI in `crates/railgun-cli`.
+The workspace includes a small offline-first CLI in `crates/railgunners-cli`.
 
 Current address commands:
 
 ```sh
-railguncli address encode --master-public-key "0000000000000000000000000000000000000000000000000000000000000000" --chain-type 0 --chain-id 1 --viewing-public-key "0000000000000000000000000000000000000000000000000000000000000000" --json
-railguncli address decode --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
-railguncli address validate --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
-railguncli address search --lower-than "0zk1qy0000k0k4w2akdev8ju4z7yp4w4x0zz9ehxdqe9chsjuujeklwdtrv7j6fe3z53lug74ey6tjlpk2xlfdp2pnfnc4972qwpk9fvhafqtrv9ctnxgjhush3njwh" --lower-than "0zk1qyduss9nnfyycfwt03fwds69c7z27rmmulcxsq3lvn0yhwjxfa7lnrv7j6fe3z53la7dxtysu5dtqp9lh6k6qeft3j5cvawwdq7zx6t9ltsncagyz06wk4n66nt" --leading-zeroes 4 --prefix 0000dus --suffix nt --jobs 8 --progress-every 1000 --show-secrets --json
-railguncli address search --seed-mode raw --leading-zeroes 4 --jobs 8 --progress-every 1000 --show-secrets --json
+railgunners address encode --master-public-key "0000000000000000000000000000000000000000000000000000000000000000" --chain-type 0 --chain-id 1 --viewing-public-key "0000000000000000000000000000000000000000000000000000000000000000" --json
+railgunners address decode --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
+railgunners address validate --address "0zk1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqunpd9kxwatwqyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhshkca" --json
+railgunners address search --lower-than "0zk1qy0000k0k4w2akdev8ju4z7yp4w4x0zz9ehxdqe9chsjuujeklwdtrv7j6fe3z53lug74ey6tjlpk2xlfdp2pnfnc4972qwpk9fvhafqtrv9ctnxgjhush3njwh" --lower-than "0zk1qyduss9nnfyycfwt03fwds69c7z27rmmulcxsq3lvn0yhwjxfa7lnrv7j6fe3z53la7dxtysu5dtqp9lh6k6qeft3j5cvawwdq7zx6t9ltsncagyz06wk4n66nt" --leading-zeroes 4 --prefix 0000dus --suffix nt --jobs 8 --progress-every 1000 --show-secrets --json
+railgunners address search --seed-mode raw --leading-zeroes 4 --jobs 8 --progress-every 1000 --show-secrets --json
 ```
 
 Notes:
@@ -107,10 +107,10 @@ Notes:
 Current mnemonic commands:
 
 ```sh
-railguncli mnemonic generate
-railguncli mnemonic generate --words 24 --json
-railguncli mnemonic validate --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
-railguncli mnemonic seed --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --show-secrets --json
+railgunners mnemonic generate
+railgunners mnemonic generate --words 24 --json
+railgunners mnemonic validate --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+railgunners mnemonic seed --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --show-secrets --json
 ```
 
 Notes:
@@ -123,11 +123,11 @@ Notes:
 Current key commands:
 
 ```sh
-railguncli keys derive --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --index 0 --show-secrets --json
-railguncli keys derive --raw-seed "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4" --index 0 --show-secrets --json
-railguncli keys inspect-viewing-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
-railguncli keys inspect-spending-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
-railguncli keys inspect-master-public --spending-public-key-x "15684838006997671713939066069845237677934334329285343229142447933587909549584" --spending-public-key-y "11878614856120328179849762231924033298788609151532558727282528569229552954628" --nullifying-key "8368299126798249740586535953124199418524409103803955764525436743456763691384" --json
+railgunners keys derive --mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" --index 0 --show-secrets --json
+railgunners keys derive --raw-seed "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4" --index 0 --show-secrets --json
+railgunners keys inspect-viewing-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
+railgunners keys inspect-spending-private --private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --json
+railgunners keys inspect-master-public --spending-public-key-x "15684838006997671713939066069845237677934334329285343229142447933587909549584" --spending-public-key-y "11878614856120328179849762231924033298788609151532558727282528569229552954628" --nullifying-key "8368299126798249740586535953124199418524409103803955764525436743456763691384" --json
 ```
 
 Notes:
@@ -145,9 +145,9 @@ Notes:
 Current shareable viewing key commands:
 
 ```sh
-railguncli viewing-key encode --viewing-private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --packed-spending-public-key "eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
-railguncli viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
-railguncli viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --chain-type 0 --chain-id 1 --show-secrets --json
+railgunners viewing-key encode --viewing-private-key "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef" --packed-spending-public-key "eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
+railgunners viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --show-secrets --json
+railgunners viewing-key decode --shareable-viewing-key "82a576privc42067d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599efa473707562c420eb68b98efb30b4c3beccfd1776fb0f92bfaf9fef89bc0c54dd4cb76c21b8741b" --chain-type 0 --chain-id 1 --show-secrets --json
 ```
 
 Notes:

@@ -26,10 +26,10 @@ The exact crate set can evolve, but the initial workspace should follow a shape 
 ```text
 .
 ├── crates/
-│   ├── railgun-types/
-│   ├── railgun-core/
-│   ├── railgun-wasm/
-│   └── railgun-cli/
+│   ├── railgunners-types/
+│   ├── railgunners-core/
+│   ├── railgunners-wasm/
+│   └── railgunners-cli/
 ├── adapters/
 │   └── optional integrations added when needed
 └── docs and top-level project files
@@ -42,7 +42,7 @@ This layout communicates intent clearly:
 
 ## Layer Responsibilities
 
-### `railgun-types`
+### `railgunners-types`
 
 This crate should contain shared domain types and validated primitives used across the workspace.
 
@@ -59,7 +59,7 @@ Examples include:
 
 This crate should stay small, stable, and heavily reused.
 
-### `railgun-core`
+### `railgunners-core`
 
 This crate should define the most broadly shared protocol abstractions and logic.
 
@@ -71,13 +71,13 @@ Examples include:
 - shared validation rules
 - common request or response models that are not tied to one integration
 
-`railgun-core` should not become a grab bag. If a subsystem develops meaningful complexity, it should graduate into its own crate.
+`railgunners-core` should not become a grab bag. If a subsystem develops meaningful complexity, it should graduate into its own crate.
 
 #### Crypto Backend Placement
 
-Protocol-critical cryptographic backends that are required for shared core behavior may live inside `railgun-core` when they are implementation details of the core protocol surface rather than reusable products of their own.
+Protocol-critical cryptographic backends that are required for shared core behavior may live inside `railgunners-core` when they are implementation details of the core protocol surface rather than reusable products of their own.
 
-This repository currently keeps the Circom-compatible Poseidon backend in `railgun-core::crypto` rather than splitting it into a separate crate because:
+This repository currently keeps the Circom-compatible Poseidon backend in `railgunners-core::crypto` rather than splitting it into a separate crate because:
 
 - exact arity and conversion behavior is part of the shared protocol surface
 - the current need is internal core functionality, not a reusable standalone package
@@ -96,7 +96,7 @@ The exact split can evolve, but each crate must have a narrow purpose and should
 
 #### Proof Of Innocence Transport Boundary
 
-`railgun-poi` owns typed POI request and response models plus pure validation helpers.
+`railgunners-poi` owns typed POI request and response models plus pure validation helpers.
 Concrete POI networking should stay optional and sit behind a transport boundary rather than becoming the only public access path.
 
 That means:
@@ -115,7 +115,7 @@ Examples of future adapters include EVM integrations built on `alloy` and browse
 
 Adapter crates may include convenience helpers, but those helpers must not define the required shape of core APIs.
 
-### `railgun-wasm`
+### `railgunners-wasm`
 
 This crate should expose a JavaScript-friendly surface while remaining a thin translation layer.
 
@@ -128,7 +128,7 @@ It should be responsible for:
 
 It should not contain alternate business logic.
 
-### `railgun-cli`
+### `railgunners-cli`
 
 This crate should expose a focused command-line interface over public workspace APIs.
 

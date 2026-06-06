@@ -2,7 +2,7 @@
 
 ## Project overview
 
-`railgun-rs` is a modular Rust SDK for the RAILGUN privacy system. It provides shared protocol libraries, thin WASM bindings, and a small CLI built on the same public APIs. The main technologies are Rust, Cargo, and Nix.
+`railgunners` is a modular Rust SDK for the RAILGUN privacy system. It provides shared protocol libraries, thin WASM bindings, and a small CLI built on the same public APIs. The main technologies are Rust, Cargo, and Nix.
 
 If this file conflicts with `ARCHITECTURE_CONSTITUTION.md`, the constitution wins.
 
@@ -12,8 +12,8 @@ If this file conflicts with `ARCHITECTURE_CONSTITUTION.md`, the constitution win
 - Fetch dependencies: `cargo fetch`
 - Check the workspace: `cargo check`
 - Build the workspace: `cargo build`
-- Build the CLI package: `cargo build -p railgun-cli`
-- Run the CLI locally: `cargo run -p railgun-cli -- --help`
+- Build the CLI package: `cargo build -p railgunners-cli`
+- Run the CLI locally: `cargo run -p railgunners-cli -- --help`
 - Build with pinned Nix config: `nix build .#default`
 
 ## Testing and verification
@@ -28,14 +28,14 @@ Changes are not complete until the smallest relevant crate-level checks pass. Ru
 
 ## Project structure
 
-- `crates/railgun-types/` - shared domain types and validated primitives
-- `crates/railgun-core/` - shared protocol traits, errors, crypto, and core logic
-- `crates/railgun-artifacts/` - proving-artifact metadata and optional downloads
-- `crates/railgun-broadcaster/` - typed broadcaster models and helpers
-- `crates/railgun-poi/` - typed Proof of Innocence models, validation, and optional transports
-- `crates/railgun-prover/` - proving abstractions and helpers
-- `crates/railgun-wasm/` - thin WASM bindings over Rust logic
-- `crates/railgun-cli/` - thin operational CLI using public library APIs
+- `crates/railgunners-types/` - shared domain types and validated primitives
+- `crates/railgunners-core/` - shared protocol traits, errors, crypto, and core logic
+- `crates/railgunners-artifacts/` - proving-artifact metadata and optional downloads
+- `crates/railgunners-broadcaster/` - typed broadcaster models and helpers
+- `crates/railgunners-poi/` - typed Proof of Innocence models, validation, and optional transports
+- `crates/railgunners-prover/` - proving abstractions and helpers
+- `crates/railgunners-wasm/` - thin WASM bindings over Rust logic
+- `crates/railgunners-cli/` - thin operational CLI using public library APIs
 
 ## Code and git workflow
 
@@ -50,8 +50,8 @@ Changes are not complete until the smallest relevant crate-level checks pass. Ru
 
 - Must preserve layering: `core/domain -> adapters -> bindings/apps`.
 - Must keep vendor-specific integrations out of core crates.
-- Must keep `railgun-wasm` thin; do not move protocol logic into bindings.
-- Must keep `railgun-cli` thin; if the CLI needs new behavior, add it to public library APIs first.
+- Must keep `railgunners-wasm` thin; do not move protocol logic into bindings.
+- Must keep `railgunners-cli` thin; if the CLI needs new behavior, add it to public library APIs first.
 - Must prefer typed domain models over raw strings, bytes, or maps for protocol concepts.
 - Must use fallible validation at boundaries when invalid input is possible.
 - Must keep defaults optional; do not hard-wire one external stack.

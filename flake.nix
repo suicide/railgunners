@@ -57,12 +57,12 @@
           src = ./.;
           filter = path: type:
             (craneLib.filterCargoSources path type)
-            || (pkgs.lib.hasInfix "/crates/railgun-artifacts/data/" path)
-            || (pkgs.lib.hasInfix "/crates/railgun-core/testdata/poseidon/" path)
-            || (pkgs.lib.hasInfix "/crates/railgun-core/src/crypto/poseidon/" path);
+            || (pkgs.lib.hasInfix "/crates/railgunners-artifacts/data/" path)
+            || (pkgs.lib.hasInfix "/crates/railgunners-core/testdata/poseidon/" path)
+            || (pkgs.lib.hasInfix "/crates/railgunners-core/src/crypto/poseidon/" path);
         };
         commonArgs = {
-          pname = "railgun-rs";
+          pname = "railgunners";
           version = "0.1.0";
           inherit src;
           strictDeps = true;
@@ -73,8 +73,8 @@
           workspaceCheckArgs
           // {
             inherit cargoArtifacts;
-            pname = "railgun-cli";
-            cargoExtraArgs = "-p railgun-cli";
+            pname = "railgunners-cli";
+            cargoExtraArgs = "-p railgunners-cli";
           }
         );
       in
@@ -96,7 +96,7 @@
               pkgs.jq
             ];
             config = {
-              Cmd = [ "${cliPackage}/bin/railguncli" ];
+              Cmd = [ "${cliPackage}/bin/railgunners" ];
               Env = [
                 "PATH=/bin"
                 "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
@@ -110,7 +110,7 @@
           check = craneLib.cargoBuild (
             workspaceCheckArgs
             // {
-              pname = "railgun-rs-check";
+              pname = "railgunners-check";
               cargoBuildCommand = "cargo check";
               cargoBuildExtraArgs = "--workspace --all-targets --all-features";
             }
@@ -124,7 +124,7 @@
           tests = craneLib.cargoTest (workspaceCheckArgs // { cargoTestExtraArgs = "--workspace"; });
           fmt = craneLib.cargoFmt {
             inherit src;
-            pname = "railgun-rs";
+            pname = "railgunners";
             version = "0.1.0";
           };
           deny = craneLib.cargoDeny workspaceCheckArgs;
