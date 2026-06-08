@@ -1,12 +1,14 @@
 //! Typed errors for broadcaster message parsing and validation.
 
+use std::borrow::Cow;
+
 /// Errors raised while parsing or validating broadcaster-facing payloads.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BroadcasterError {
     /// The outer broadcaster fee message JSON could not be parsed.
     InvalidFeeMessagePayload,
     /// The broadcaster fee message was missing or malformed.
-    InvalidFeeMessage(&'static str),
+    InvalidFeeMessage(Cow<'static, str>),
     /// The hex-encoded fee message data field could not be decoded.
     InvalidFeeMessageDataHex,
     /// The decoded fee message data bytes were not valid UTF-8.
@@ -14,7 +16,7 @@ pub enum BroadcasterError {
     /// The inner broadcaster fee message data JSON could not be parsed.
     InvalidFeeMessageDataJson,
     /// The parsed fee message data contained invalid field values.
-    InvalidFeeMessageField(&'static str),
+    InvalidFeeMessageField(Cow<'static, str>),
     /// The fee quote is stale for the supplied validation time.
     ExpiredFeeQuote {
         /// Fee-expiration timestamp carried by the message.
@@ -29,7 +31,7 @@ pub enum BroadcasterError {
     /// The transact payload JSON could not be parsed.
     InvalidTransactPayloadJson,
     /// The parsed transact payload was missing required data.
-    InvalidTransactPayload(&'static str),
+    InvalidTransactPayload(Cow<'static, str>),
     /// The transact payload requested an unsupported transact type.
     UnsupportedTransactType(String),
     /// The transact payload used an unsupported txid version.
@@ -45,15 +47,15 @@ pub enum BroadcasterError {
     /// The transact payload used malformed calldata.
     InvalidTransactCalldata,
     /// The transact payload POI bundle was malformed.
-    InvalidTransactPoiBundle(&'static str),
+    InvalidTransactPoiBundle(Cow<'static, str>),
     /// The transact envelope JSON could not be parsed.
     InvalidTransactEnvelopePayloadJson,
     /// The transact envelope was malformed.
-    InvalidTransactEnvelopePayload(&'static str),
+    InvalidTransactEnvelopePayload(Cow<'static, str>),
     /// The transact envelope public key was malformed.
     InvalidTransactEnvelopePubkey,
     /// The transact envelope encrypted payload tuple was malformed.
-    InvalidTransactEnvelopeEncryptedData(&'static str),
+    InvalidTransactEnvelopeEncryptedData(Cow<'static, str>),
     /// The broadcaster viewing key used for transact encryption was invalid.
     InvalidBroadcasterEncryptionKey,
     /// Broadcaster transact encryption failed unexpectedly.
@@ -65,7 +67,7 @@ pub enum BroadcasterError {
     /// The transact response JSON could not be parsed.
     InvalidTransactResponsePayloadJson,
     /// The transact response was malformed.
-    InvalidTransactResponsePayload(&'static str),
+    InvalidTransactResponsePayload(Cow<'static, str>),
 }
 
 impl core::fmt::Display for BroadcasterError {
@@ -146,3 +148,24 @@ impl core::fmt::Display for BroadcasterError {
 }
 
 impl std::error::Error for BroadcasterError {}
+
+#[cfg(test)]
+mod tests {
+    use super::BroadcasterError;
+
+    #[test]
+    fn invalid_transact_payload_accepts_literal_messages() {
+        let error = BroadcasterError::InvalidTransactPayload("minVersion must not be empty".into());
+
+        assert_eq!(error.to_string(), "minVersion must not be empty");
+    }
+
+    #[test]
+    fn invalid_transact_payload_accepts_owned_messages() {
+        let message = format!("{} must not be empty", "minGasPrice");
+        let error = BroadcasterError::InvalidTransactPayload(message.clone().into());
+
+        assert_eq!(error, BroadcasterError::InvalidTransactPayload(message.into()));
+        assert_eq!(error.to_string(), "minGasPrice must not be empty");
+    }
+}

@@ -49,10 +49,14 @@ impl BroadcasterVersionRange {
     /// Returns an error if either version string is empty.
     pub fn new(min_version: String, max_version: String) -> Result<Self, BroadcasterError> {
         if min_version.is_empty() {
-            return Err(BroadcasterError::InvalidTransactPayload("minVersion must not be empty"));
+            return Err(BroadcasterError::InvalidTransactPayload(
+                "minVersion must not be empty".into(),
+            ));
         }
         if max_version.is_empty() {
-            return Err(BroadcasterError::InvalidTransactPayload("maxVersion must not be empty"));
+            return Err(BroadcasterError::InvalidTransactPayload(
+                "maxVersion must not be empty".into(),
+            ));
         }
 
         Ok(Self { min_version, max_version })
@@ -100,7 +104,9 @@ impl BroadcasterRequestSharedParams {
         version_range: BroadcasterVersionRange,
     ) -> Result<Self, BroadcasterError> {
         if fees_id.is_empty() {
-            return Err(BroadcasterError::InvalidTransactPayload("feesID must not be empty"));
+            return Err(BroadcasterError::InvalidTransactPayload(
+                "feesID must not be empty".into(),
+            ));
         }
         validate_viewing_key_hex(&broadcaster_viewing_key)?;
 
@@ -190,7 +196,9 @@ impl BroadcasterRawParamsTransactCommon {
         pre_transaction_pois_per_txid_leaf_per_list: PreTransactionPoisPerTxidLeafPerList,
     ) -> Result<Self, BroadcasterError> {
         if min_gas_price.is_empty() {
-            return Err(BroadcasterError::InvalidTransactPayload("minGasPrice must not be empty"));
+            return Err(BroadcasterError::InvalidTransactPayload(
+                "minGasPrice must not be empty".into(),
+            ));
         }
         validate_address_hex(&to)?;
         validate_hex_bytes(&data).map_err(|_| BroadcasterError::InvalidTransactCalldata)?;
@@ -311,10 +319,12 @@ fn validate_hex_bytes(value: &str) -> Result<Vec<u8>, BroadcasterError> {
 fn decode_hex_exact<const N: usize>(value: &str) -> Result<[u8; N], BroadcasterError> {
     let trimmed = value.strip_prefix("0x").unwrap_or(value);
     let bytes = hex::decode(trimmed).map_err(|_| {
-        BroadcasterError::InvalidTransactPoiBundle("expected canonical hex encoding")
+        BroadcasterError::InvalidTransactPoiBundle("expected canonical hex encoding".into())
     })?;
     bytes.try_into().map_err(|_| {
-        BroadcasterError::InvalidTransactPoiBundle("expected canonical fixed-width hex encoding")
+        BroadcasterError::InvalidTransactPoiBundle(
+            "expected canonical fixed-width hex encoding".into(),
+        )
     })
 }
 
@@ -383,7 +393,9 @@ fn parse_shared_params(
 
 fn parse_merkle_root(value: &str) -> Result<MerkleRoot, BroadcasterError> {
     MerkleRoot::from_slice(&decode_hex_exact::<32>(value)?).map_err(|_| {
-        BroadcasterError::InvalidTransactPoiBundle("POI merkleroots must be 32-byte hex values")
+        BroadcasterError::InvalidTransactPoiBundle(
+            "POI merkleroots must be 32-byte hex values".into(),
+        )
     })
 }
 
@@ -391,7 +403,7 @@ fn parse_railgun_txid(value: &str) -> Result<RailgunTxid, BroadcasterError> {
     RailgunTxid::new(num_bigint::BigUint::from_bytes_be(&decode_hex_exact::<32>(value)?)).map_err(
         |_| {
             BroadcasterError::InvalidTransactPoiBundle(
-                "railgunTxidIfHasUnshield must be canonical BN254 field bytes",
+                "railgunTxidIfHasUnshield must be canonical BN254 field bytes".into(),
             )
         },
     )
@@ -411,7 +423,7 @@ fn parse_pre_transaction_poi(
         .map(|value| {
             BlindedCommitment::parse(value).map_err(|_| {
                 BroadcasterError::InvalidTransactPoiBundle(
-                    "blindedCommitmentsOut must contain canonical 32-byte BN254 field hex",
+                    "blindedCommitmentsOut must contain canonical 32-byte BN254 field hex".into(),
                 )
             })
         })
@@ -420,7 +432,9 @@ fn parse_pre_transaction_poi(
     PreTransactionPoi::new(
         Groth16Proof::new(wire.snark_proof.pi_a, wire.snark_proof.pi_b, wire.snark_proof.pi_c),
         parse_merkle_root(&wire.txid_merkleroot).map_err(|_| {
-            BroadcasterError::InvalidTransactPoiBundle("txidMerkleroot must be a 32-byte hex value")
+            BroadcasterError::InvalidTransactPoiBundle(
+                "txidMerkleroot must be a 32-byte hex value".into(),
+            )
         })?,
         poi_merkleroots,
         blinded_commitments_out,
@@ -428,8 +442,8 @@ fn parse_pre_transaction_poi(
     )
     .map_err(|error| {
         BroadcasterError::InvalidTransactPoiBundle(match error {
-            railgunners_poi::PoiError::InvalidPoiPayload(message) => message,
-            _ => "preTransactionPOIsPerTxidLeafPerList contained an invalid proof payload",
+            railgunners_poi::PoiError::InvalidPoiPayload(message) => message.into(),
+            _ => "preTransactionPOIsPerTxidLeafPerList contained an invalid proof payload".into(),
         })
     })
 }
@@ -442,14 +456,16 @@ fn parse_pre_transaction_poi_bundle(
     for (list_key, txid_map) in wire {
         let typed_list_key = PoiListKey::parse(&list_key).map_err(|_| {
             BroadcasterError::InvalidTransactPoiBundle(
-                "preTransactionPOIsPerTxidLeafPerList keys must be canonical 32-byte hex list keys",
+                "preTransactionPOIsPerTxidLeafPerList keys must be canonical 32-byte hex list keys"
+                    .into(),
             )
         })?;
         let mut typed_txid_map = HashMap::new();
         for (txid_leaf_hash, proof) in txid_map {
             let typed_txid_leaf_hash = TxidLeafHash::parse(&txid_leaf_hash).map_err(|_| {
                 BroadcasterError::InvalidTransactPoiBundle(
-                    "preTransactionPOIsPerTxidLeafPerList txid keys must be canonical 32-byte hex txid leaf hashes",
+                    "preTransactionPOIsPerTxidLeafPerList txid keys must be canonical 32-byte hex txid leaf hashes"
+                        .into(),
                 )
             })?;
             typed_txid_map.insert(typed_txid_leaf_hash, parse_pre_transaction_poi(proof)?);
@@ -744,7 +760,8 @@ mod tests {
         assert_eq!(
             error,
             BroadcasterError::InvalidTransactPoiBundle(
-                "preTransactionPOIsPerTxidLeafPerList keys must be canonical 32-byte hex list keys",
+                "preTransactionPOIsPerTxidLeafPerList keys must be canonical 32-byte hex list keys"
+                    .into(),
             )
         );
     }

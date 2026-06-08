@@ -70,12 +70,12 @@ impl BroadcasterTransactResponse {
     ) -> Result<Self, BroadcasterError> {
         if id.is_empty() {
             return Err(BroadcasterError::InvalidTransactResponsePayload(
-                "broadcaster transact response id must not be empty",
+                "broadcaster transact response id must not be empty".into(),
             ));
         }
         if tx_hash.is_some() == error.is_some() {
             return Err(BroadcasterError::InvalidTransactResponsePayload(
-                "broadcaster transact response must contain exactly one of txHash or error",
+                "broadcaster transact response must contain exactly one of txHash or error".into(),
             ));
         }
 
@@ -132,12 +132,12 @@ fn decode_hex_exact<const N: usize>(value: &str) -> Result<[u8; N], BroadcasterE
     let trimmed = value.strip_prefix("0x").unwrap_or(value);
     let bytes = hex::decode(trimmed).map_err(|_| {
         BroadcasterError::InvalidTransactResponsePayload(
-            "expected canonical fixed-width hex encoding",
+            "expected canonical fixed-width hex encoding".into(),
         )
     })?;
     bytes.try_into().map_err(|_| {
         BroadcasterError::InvalidTransactResponsePayload(
-            "expected canonical fixed-width hex encoding",
+            "expected canonical fixed-width hex encoding".into(),
         )
     })
 }
@@ -174,7 +174,7 @@ impl TryFrom<BroadcasterTransactEnvelopeWire> for BroadcasterTransactEnvelope {
     fn try_from(value: BroadcasterTransactEnvelopeWire) -> Result<Self, Self::Error> {
         if value.method != "transact" {
             return Err(BroadcasterError::InvalidTransactEnvelopePayload(
-                "broadcaster transact envelope method must be 'transact'",
+                "broadcaster transact envelope method must be 'transact'".into(),
             ));
         }
 
@@ -455,7 +455,7 @@ mod tests {
         assert_eq!(
             error,
             BroadcasterError::InvalidTransactEnvelopePayload(
-                "broadcaster transact envelope method must be 'transact'",
+                "broadcaster transact envelope method must be 'transact'".into(),
             )
         );
     }
@@ -494,7 +494,7 @@ mod tests {
         assert_eq!(
             error,
             BroadcasterError::InvalidTransactResponsePayload(
-                "broadcaster transact response must contain exactly one of txHash or error",
+                "broadcaster transact response must contain exactly one of txHash or error".into(),
             )
         );
     }
@@ -514,7 +514,7 @@ mod tests {
         assert_eq!(
             error,
             BroadcasterError::InvalidTransactResponsePayload(
-                "broadcaster transact response id must not be empty",
+                "broadcaster transact response id must not be empty".into(),
             )
         );
     }

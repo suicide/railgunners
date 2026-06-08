@@ -96,18 +96,18 @@ fn decode_encrypted_data(
 
     let iv_tag_bytes = hex::decode(iv_tag).map_err(|_| {
         BroadcasterError::InvalidTransactEnvelopeEncryptedData(
-            "broadcaster transact encryptedData[0] must be valid hex",
+            "broadcaster transact encryptedData[0] must be valid hex".into(),
         )
     })?;
     if iv_tag_bytes.len() != IV_TAG_LENGTH {
         return Err(BroadcasterError::InvalidTransactEnvelopeEncryptedData(
-            "broadcaster transact encryptedData[0] must contain 16-byte iv and 16-byte tag",
+            "broadcaster transact encryptedData[0] must contain 16-byte iv and 16-byte tag".into(),
         ));
     }
 
     let ciphertext_bytes = hex::decode(ciphertext).map_err(|_| {
         BroadcasterError::InvalidTransactEnvelopeEncryptedData(
-            "broadcaster transact encryptedData[1] must be valid hex",
+            "broadcaster transact encryptedData[1] must be valid hex".into(),
         )
     })?;
 
@@ -555,7 +555,8 @@ mod tests {
         assert_eq!(
             error,
             BroadcasterError::InvalidTransactEnvelopeEncryptedData(
-                "broadcaster transact encryptedData[0] must contain 16-byte iv and 16-byte tag",
+                "broadcaster transact encryptedData[0] must contain 16-byte iv and 16-byte tag"
+                    .into(),
             )
         );
     }
@@ -676,7 +677,8 @@ mod tests {
         assert_eq!(
             error,
             BroadcasterError::InvalidTransactEnvelopeEncryptedData(
-                "broadcaster transact encryptedData[0] must contain 16-byte iv and 16-byte tag",
+                "broadcaster transact encryptedData[0] must contain 16-byte iv and 16-byte tag"
+                    .into(),
             )
         );
     }

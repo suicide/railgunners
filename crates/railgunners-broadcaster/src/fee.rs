@@ -215,13 +215,15 @@ fn validate_fee_message_data_fields(
     version: &str,
 ) -> Result<(), BroadcasterError> {
     if fees_id.is_empty() {
-        return Err(BroadcasterError::InvalidFeeMessageField("feesID must not be empty"));
+        return Err(BroadcasterError::InvalidFeeMessageField("feesID must not be empty".into()));
     }
     if railgun_address.as_str().is_empty() {
-        return Err(BroadcasterError::InvalidFeeMessageField("railgunAddress must not be empty"));
+        return Err(BroadcasterError::InvalidFeeMessageField(
+            "railgunAddress must not be empty".into(),
+        ));
     }
     if version.is_empty() {
-        return Err(BroadcasterError::InvalidFeeMessageField("version must not be empty"));
+        return Err(BroadcasterError::InvalidFeeMessageField("version must not be empty".into()));
     }
 
     Ok(())
@@ -229,22 +231,27 @@ fn validate_fee_message_data_fields(
 
 fn parse_relay_adapt(value: &str) -> Result<Address, BroadcasterError> {
     if value.is_empty() {
-        return Err(BroadcasterError::InvalidFeeMessageField("relayAdapt must not be empty"));
+        return Err(BroadcasterError::InvalidFeeMessageField(
+            "relayAdapt must not be empty".into(),
+        ));
     }
 
     Address::parse(value)
-        .map_err(|_| BroadcasterError::InvalidFeeMessageField("relayAdapt is invalid"))
+        .map_err(|_| BroadcasterError::InvalidFeeMessageField("relayAdapt is invalid".into()))
 }
 
 fn parse_relay_adapt_7702(value: Option<String>) -> Result<Option<Address>, BroadcasterError> {
     value
         .map(|relay_adapt_7702| {
             if relay_adapt_7702.is_empty() {
-                return Err(BroadcasterError::InvalidFeeMessageField("relayAdapt7702 is invalid"));
+                return Err(BroadcasterError::InvalidFeeMessageField(
+                    "relayAdapt7702 is invalid".into(),
+                ));
             }
 
-            Address::parse(&relay_adapt_7702)
-                .map_err(|_| BroadcasterError::InvalidFeeMessageField("relayAdapt7702 is invalid"))
+            Address::parse(&relay_adapt_7702).map_err(|_| {
+                BroadcasterError::InvalidFeeMessageField("relayAdapt7702 is invalid".into())
+            })
         })
         .transpose()
 }
@@ -253,8 +260,9 @@ impl TryFrom<BroadcasterFeeMessageDataWire> for BroadcasterFeeMessageData {
     type Error = BroadcasterError;
 
     fn try_from(value: BroadcasterFeeMessageDataWire) -> Result<Self, Self::Error> {
-        let railgun_address = RailgunAddress::parse(&value.railgun_address)
-            .map_err(|_| BroadcasterError::InvalidFeeMessageField("railgunAddress is invalid"))?;
+        let railgun_address = RailgunAddress::parse(&value.railgun_address).map_err(|_| {
+            BroadcasterError::InvalidFeeMessageField("railgunAddress is invalid".into())
+        })?;
         let relay_adapt = parse_relay_adapt(&value.relay_adapt)?;
         let relay_adapt_7702 = parse_relay_adapt_7702(value.relay_adapt_7702)?;
         validate_fee_message_data_fields(&value.fees_id, &railgun_address, &value.version)?;
@@ -264,7 +272,7 @@ impl TryFrom<BroadcasterFeeMessageDataWire> for BroadcasterFeeMessageData {
             .map(|list_key| {
                 PoiListKey::parse(list_key).map_err(|_| {
                     BroadcasterError::InvalidFeeMessageField(
-                        "requiredPOIListKeys must contain canonical 32-byte hex keys",
+                        "requiredPOIListKeys must contain canonical 32-byte hex keys".into(),
                     )
                 })
             })
@@ -331,10 +339,10 @@ pub fn parse_fee_message_wire(payload: &str) -> Result<(String, String), Broadca
     let wire: BroadcasterFeeMessageWire =
         serde_json::from_str(payload).map_err(|_| BroadcasterError::InvalidFeeMessagePayload)?;
     if wire.data.is_empty() {
-        return Err(BroadcasterError::InvalidFeeMessage("data must not be empty"));
+        return Err(BroadcasterError::InvalidFeeMessage("data must not be empty".into()));
     }
     if wire.signature.is_empty() {
-        return Err(BroadcasterError::InvalidFeeMessage("signature must not be empty"));
+        return Err(BroadcasterError::InvalidFeeMessage("signature must not be empty".into()));
     }
     Ok((wire.data, wire.signature))
 }
@@ -408,11 +416,13 @@ pub fn sign_fee_message(
 pub fn verify_fee_message_signature(
     message: &BroadcasterFeeMessage,
 ) -> Result<(), BroadcasterError> {
-    let decoded_address = decode_railgun_address(message.data.railgun_address().as_str())
-        .map_err(|_| BroadcasterError::InvalidFeeMessageField("railgunAddress is invalid"))?;
+    let decoded_address =
+        decode_railgun_address(message.data.railgun_address().as_str()).map_err(|_| {
+            BroadcasterError::InvalidFeeMessageField("railgunAddress is invalid".into())
+        })?;
     let verifying_key = VerifyingKey::from_bytes(decoded_address.viewing_public_key().as_bytes())
         .map_err(|_| {
-        BroadcasterError::InvalidFeeMessageField("railgunAddress viewing key is invalid")
+        BroadcasterError::InvalidFeeMessageField("railgunAddress viewing key is invalid".into())
     })?;
     let signature = decode_signature(message.signature())?;
     let decoded_data = decode_hex(message.encoded_data())?;
@@ -662,7 +672,10 @@ mod tests {
             panic!("invalid relayAdapt7702 should fail");
         };
 
-        assert_eq!(error, BroadcasterError::InvalidFeeMessageField("relayAdapt7702 is invalid"));
+        assert_eq!(
+            error,
+            BroadcasterError::InvalidFeeMessageField("relayAdapt7702 is invalid".into())
+        );
     }
 
     #[test]
@@ -755,7 +768,7 @@ mod tests {
         assert_eq!(
             error,
             BroadcasterError::InvalidFeeMessageField(
-                "requiredPOIListKeys must contain canonical 32-byte hex keys",
+                "requiredPOIListKeys must contain canonical 32-byte hex keys".into(),
             )
         );
     }
@@ -898,6 +911,9 @@ mod tests {
             panic!("missing fees id should fail");
         };
 
-        assert_eq!(error, BroadcasterError::InvalidFeeMessageField("feesID must not be empty"));
+        assert_eq!(
+            error,
+            BroadcasterError::InvalidFeeMessageField("feesID must not be empty".into())
+        );
     }
 }
