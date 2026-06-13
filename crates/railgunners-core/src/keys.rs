@@ -1,13 +1,15 @@
 //! Railgun spending and viewing keypair derivation.
 
+use ark_ff::PrimeField;
 use ed25519_dalek::SigningKey;
+use num_bigint::BigUint;
 use railgunners_types::{
     MasterPublicKey, NullifyingKey, SpendingKeyPair, SpendingPrivateKey, SpendingPublicKey,
     ViewingKeyPair, ViewingPrivateKey, ViewingPublicKey, WalletScanKeyBundle,
 };
 
 use crate::crypto::{CryptoError, babyjubjub, poseidon};
-use crate::hd::{KeyDerivationError, WalletNode};
+use crate::hd::{KeyDerivationError, WalletNode, derive_spending_and_viewing_nodes};
 
 impl From<CryptoError> for KeyDerivationError {
     fn from(_: CryptoError) -> Self {
@@ -165,15 +167,124 @@ pub fn derive_master_public_key(
     nullifying_key: &NullifyingKey,
 ) -> Result<MasterPublicKey, KeyDerivationError> {
     babyjubjub::validate_spending_public_key(spending_public_key)?;
-    let inputs = [
-        poseidon::field_from_biguint(spending_public_key.x())?,
-        poseidon::field_from_biguint(spending_public_key.y())?,
-        poseidon::field_from_biguint(nullifying_key.value())?,
-    ];
-    let hash = poseidon::hash_fields(&inputs)?;
+    master_public_key_from_canonical_inputs(
+        spending_public_key.x(),
+        spending_public_key.y(),
+        nullifying_key.value(),
+    )
+}
+
+/// Derives a master public key from canonical `BigUint` inputs that have already
+/// been validated as BN254 field elements.
+///
+/// Unlike `derive_master_public_key`, this skips revalidating the spending
+/// public key and skips the round-trip check inside `field_from_biguint`. It
+/// is intended for the search fast path where inputs come from a freshly
+/// derived spending public key and a freshly derived nullifying key.
+pub(crate) fn master_public_key_from_canonical_inputs(
+    spending_public_key_x: &BigUint,
+    spending_public_key_y: &BigUint,
+    nullifying_key: &BigUint,
+) -> Result<MasterPublicKey, KeyDerivationError> {
+    let x_field = ark_bn254::Fr::from_be_bytes_mod_order(&spending_public_key_x.to_bytes_be());
+    let y_field = ark_bn254::Fr::from_be_bytes_mod_order(&spending_public_key_y.to_bytes_be());
+    let n_field = ark_bn254::Fr::from_be_bytes_mod_order(&nullifying_key.to_bytes_be());
+    let hash = poseidon::hash_fields(&[x_field, y_field, n_field])?;
 
     MasterPublicKey::new(poseidon::field_to_biguint(hash))
         .map_err(|_| KeyDerivationError::DerivationFailure)
+}
+
+/// Search-only key material sufficient to evaluate the fast stem prefix filter.
+///
+/// This intentionally omits the viewing public key because the address prefix
+/// used by leading-zero and prefix searches depends only on the version byte,
+/// the master public key, and the network identifier. Callers must derive the
+/// viewing public key, the full address, and the packed spending public key
+/// only after a candidate survives the fast stem filter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SearchCandidateKeys {
+    index: u32,
+    spending_private_key: SpendingPrivateKey,
+    spending_public_key: SpendingPublicKey,
+    viewing_private_key: ViewingPrivateKey,
+    nullifying_key: NullifyingKey,
+    master_public_key: MasterPublicKey,
+}
+
+impl SearchCandidateKeys {
+    /// Returns the wallet index used for derivation.
+    #[must_use]
+    pub const fn index(&self) -> u32 {
+        self.index
+    }
+
+    /// Returns the typed spending private key.
+    #[must_use]
+    pub const fn spending_private_key(&self) -> &SpendingPrivateKey {
+        &self.spending_private_key
+    }
+
+    /// Returns the typed spending public key.
+    #[must_use]
+    pub const fn spending_public_key(&self) -> &SpendingPublicKey {
+        &self.spending_public_key
+    }
+
+    /// Returns the typed viewing private key.
+    #[must_use]
+    pub const fn viewing_private_key(&self) -> &ViewingPrivateKey {
+        &self.viewing_private_key
+    }
+
+    /// Returns the typed nullifying key.
+    #[must_use]
+    pub const fn nullifying_key(&self) -> &NullifyingKey {
+        &self.nullifying_key
+    }
+
+    /// Returns the typed master public key.
+    #[must_use]
+    pub const fn master_public_key(&self) -> &MasterPublicKey {
+        &self.master_public_key
+    }
+}
+
+/// Derives the minimum key material required for search fast-stem filtering
+/// from a canonical 64-byte BIP-39 seed.
+///
+/// This helper shares the master node HMAC across the spending and viewing
+/// branches and intentionally omits the viewing public key. Callers that need
+/// the full wallet output should call `derive_viewing_public_key` and finish
+/// the full address encoding only after a candidate matches the fast filter.
+///
+/// # Errors
+///
+/// Returns an error if the seed is not 64 bytes long, if `wallet_index` is
+/// invalid, or if any internal cryptographic primitive fails unexpectedly.
+pub fn derive_search_keys_from_seed(
+    seed: &[u8],
+    wallet_index: u32,
+) -> Result<SearchCandidateKeys, KeyDerivationError> {
+    let (spending_node, viewing_node) = derive_spending_and_viewing_nodes(seed, wallet_index)?;
+    let spending_private_key = spending_private_key_from_node(&spending_node);
+    let viewing_private_key = viewing_private_key_from_node(&viewing_node);
+    let spending_public_key = derive_spending_public_key(&spending_private_key)?;
+    let nullifying_key = derive_nullifying_key(&viewing_private_key)?;
+    let master_public_key = master_public_key_from_canonical_inputs(
+        spending_public_key.x(),
+        spending_public_key.y(),
+        nullifying_key.value(),
+    )?;
+
+    Ok(SearchCandidateKeys {
+        index: wallet_index,
+        spending_private_key,
+        spending_public_key,
+        viewing_private_key,
+        nullifying_key,
+        master_public_key,
+    })
 }
 
 #[cfg(test)]

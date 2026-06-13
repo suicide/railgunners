@@ -39,6 +39,7 @@ const SUBGROUP_ORDER: &str =
 
 static D_CONSTANT: OnceLock<Fr> = OnceLock::new();
 static A_CONSTANT: OnceLock<Fr> = OnceLock::new();
+static B8_POINT: OnceLock<Point> = OnceLock::new();
 
 fn field_constant(value: &str) -> Fr {
     Fr::from_be_bytes_mod_order(
@@ -48,8 +49,9 @@ fn field_constant(value: &str) -> Fr {
     )
 }
 
-fn half_modulus() -> BigUint {
-    bn254_scalar_field_modulus() >> 1
+fn half_modulus() -> &'static BigUint {
+    static HALF: OnceLock<BigUint> = OnceLock::new();
+    HALF.get_or_init(|| bn254_scalar_field_modulus() >> 1)
 }
 
 fn field_to_biguint(value: Fr) -> BigUint {
@@ -91,8 +93,7 @@ fn generator_point() -> Point {
 }
 
 fn b8_point() -> Point {
-    // P6: If key-derivation profiling shows this matters, cache Base8 as well.
-    Point { x: field_constant(B8_X), y: field_constant(B8_Y) }
+    *B8_POINT.get_or_init(|| Point { x: field_constant(B8_X), y: field_constant(B8_Y) })
 }
 
 fn scalar_from_private_key(private_key: &SpendingPrivateKey) -> BigUint {
@@ -205,7 +206,7 @@ fn compress_point(point: Point) -> PackedSpendingPublicKey {
     let len = y_bytes.len().min(compressed.len());
     compressed[..len].copy_from_slice(&y_bytes[..len]);
 
-    if field_to_biguint(point.x) > half_modulus() {
+    if field_to_biguint(point.x) > *half_modulus() {
         compressed[COMPRESSED_POINT_LENGTH - 1] |= 0x80;
     }
 
@@ -230,7 +231,7 @@ fn decompress_point(bytes: &[u8; COMPRESSED_POINT_LENGTH]) -> Result<Point, Cryp
         denominator.inverse().ok_or(CryptoError::InvalidPackedSpendingPublicKey)? * numerator;
     let mut x_field = x_squared.sqrt().ok_or(CryptoError::InvalidPackedSpendingPublicKey)?;
 
-    if negative != (field_to_biguint(x_field) > half_modulus()) {
+    if negative != (field_to_biguint(x_field) > *half_modulus()) {
         x_field = -x_field;
     }
 

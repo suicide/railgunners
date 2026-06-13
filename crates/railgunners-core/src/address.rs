@@ -212,6 +212,34 @@ pub fn encode_railgun_address_prefix(
     Ok(prefix)
 }
 
+/// Encodes the first `char_count` characters of a canonical `0zk` Railgun
+/// address from a precomputed payload, skipping the bech32m checksum.
+///
+/// This is intended for the address search fast path, where the checksum is
+/// not needed because the prefix is only compared against leading characters
+/// (typically the version, master public key, and a short user-provided
+/// prefix). The caller is responsible for ensuring `char_count` only covers
+/// the data portion; this function never produces a checksum suffix.
+#[must_use]
+pub fn encode_railgun_address_prefix_data(
+    payload: &[u8; ADDRESS_PAYLOAD_LENGTH],
+    char_count: usize,
+) -> String {
+    let data_char_count = (payload.len() * 8).div_ceil(5);
+    let total_data_chars = ADDRESS_HRP.len() + 1 + data_char_count;
+    let limit = char_count.min(ADDRESS_MAX_LENGTH).min(total_data_chars);
+    let mut out = String::with_capacity(limit);
+    out.push_str(ADDRESS_HRP);
+    out.push('1');
+    for (offset, fe) in (ADDRESS_HRP.len() + 1..).zip(payload.iter().copied().bytes_to_fes()) {
+        if offset >= limit {
+            break;
+        }
+        out.push(fe.to_char());
+    }
+    out
+}
+
 /// Decodes and validates a canonical `0zk` Railgun address.
 ///
 /// # Errors

@@ -305,6 +305,27 @@ pub fn derive_viewing_node(
     derive_node(seed, &path)
 }
 
+/// Derives the canonical Railgun spending and viewing nodes for `wallet_index`
+/// from a single master node derivation.
+///
+/// This shares the master node HMAC across both branches, halving the per-seed
+/// HD work compared to calling `derive_spending_node` and `derive_viewing_node`
+/// independently.
+///
+/// # Errors
+///
+/// Returns an error if `wallet_index` is invalid, the seed length is invalid,
+/// or derivation fails.
+pub fn derive_spending_and_viewing_nodes(
+    seed: &[u8],
+    wallet_index: u32,
+) -> Result<(WalletNode, WalletNode), KeyDerivationError> {
+    let master = derive_master_node(seed)?;
+    let spending_path = spending_path(wallet_index)?;
+    let viewing_path = viewing_path(wallet_index)?;
+    Ok((master.derive_path(&spending_path)?, master.derive_path(&viewing_path)?))
+}
+
 fn canonical_path(
     prefix: [u32; 4],
     wallet_index: u32,

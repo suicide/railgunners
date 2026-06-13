@@ -1,6 +1,6 @@
 use railgunners_core::{
-    Bip39Error, Bip39Mnemonic, Bip39WordCount, encode_railgun_address,
-    encode_railgun_address_prefix, encode_shareable_viewing_key,
+    Bip39Error, Bip39Mnemonic, Bip39WordCount, SearchCandidateKeys, encode_railgun_address,
+    encode_railgun_address_prefix_data, encode_shareable_viewing_key,
 };
 use railgunners_types::{ChainScope, RailgunAddress, ShareableViewingKeyData};
 use std::{
@@ -13,10 +13,7 @@ use std::{
     thread,
 };
 
-use crate::workflows::{
-    keys::{derive_wallet_keys, derive_wallet_keys_from_seed, pack_derived_spending_public_key},
-    mnemonic::generate_mnemonic,
-};
+use crate::workflows::{keys::pack_derived_spending_public_key, mnemonic::generate_mnemonic};
 
 const ALL_CHAINS_ADDRESS_STEM: &str = "0zk1qy";
 
@@ -230,12 +227,12 @@ pub(crate) fn search_address(
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum SearchSecretMaterial {
     Bip39 { mnemonic: Bip39Mnemonic, phrase: String, word_count: usize },
-    RawSeed { seed_hex: String },
+    RawSeed { seed: [u8; 64] },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 struct GeneratedSearchCandidate {
-    derived: crate::workflows::keys::DerivedWalletKeys,
+    candidate: SearchCandidateKeys,
     secret_material: SearchSecretMaterial,
 }
 
@@ -250,10 +247,11 @@ where
     search_address_with_candidate_generator(options, json, move |options| {
         let mnemonic = generator(options.word_count).map_err(AddressSearchError::Bip39)?;
         let phrase = mnemonic.phrase();
-        let derived = derive_wallet_keys(&mnemonic, options.index)
+        let seed = mnemonic.seed(None);
+        let candidate = railgunners_core::derive_search_keys_from_seed(&seed, options.index)
             .map_err(|error| AddressSearchError::KeyDerivation(error.to_string()))?;
         Ok(GeneratedSearchCandidate {
-            derived,
+            candidate,
             secret_material: SearchSecretMaterial::Bip39 {
                 mnemonic,
                 phrase,
@@ -273,12 +271,11 @@ where
 {
     search_address_with_candidate_generator(options, json, move |options| {
         let seed = generator().map_err(AddressSearchError::KeyDerivation)?;
-        let seed_hex = hex::encode(seed);
-        let derived = derive_wallet_keys_from_seed(&seed, options.index)
+        let candidate = railgunners_core::derive_search_keys_from_seed(&seed, options.index)
             .map_err(|error| AddressSearchError::KeyDerivation(error.to_string()))?;
         Ok(GeneratedSearchCandidate {
-            derived,
-            secret_material: SearchSecretMaterial::RawSeed { seed_hex },
+            candidate,
+            secret_material: SearchSecretMaterial::RawSeed { seed },
         })
     })
 }
@@ -390,7 +387,7 @@ fn worker_loop<F>(
                 return;
             }
         };
-        let fast_stem_match = match matches_fast_stem_filters(&candidate.derived, options) {
+        let fast_stem_match = match matches_fast_stem_filters(&candidate.candidate, options) {
             Ok(matches) => matches,
             Err(error) => {
                 send_worker_failure(sender, stop, error);
@@ -399,26 +396,11 @@ fn worker_loop<F>(
         };
         if !fast_stem_match {
             if should_report_progress {
-                let candidate_address = match encode_railgun_address(
-                    1,
-                    candidate.derived.master_public_key(),
-                    ChainScope::AllChains,
-                    candidate.derived.viewing_public_key(),
-                ) {
-                    Ok(address) => address,
-                    Err(error) => {
-                        send_worker_failure(
-                            sender,
-                            stop,
-                            AddressSearchError::AddressEncoding(error.to_string()),
-                        );
-                        return;
-                    }
-                };
-                report_progress(
+                let prefix = candidate_address_prefix(&candidate.candidate);
+                report_progress_prefix(
                     worker_id,
                     attempt,
-                    &candidate_address,
+                    &prefix,
                     minimum_lower_than,
                     options,
                     json,
@@ -426,12 +408,7 @@ fn worker_loop<F>(
             }
             continue;
         }
-        let candidate_address = match encode_railgun_address(
-            1,
-            candidate.derived.master_public_key(),
-            ChainScope::AllChains,
-            candidate.derived.viewing_public_key(),
-        ) {
+        let candidate_address = match encode_full_address(&candidate.candidate) {
             Ok(address) => address,
             Err(error) => {
                 send_worker_failure(
@@ -447,7 +424,7 @@ fn worker_loop<F>(
 
         if matches_search_filters(&candidate_address, minimum_lower_than, options) {
             let packed_spending_public_key =
-                match pack_derived_spending_public_key(candidate.derived.spending_public_key()) {
+                match pack_derived_spending_public_key(candidate.candidate.spending_public_key()) {
                     Ok(key) => key,
                     Err(error) => {
                         send_worker_failure(
@@ -462,7 +439,7 @@ fn worker_loop<F>(
                 minimum_lower_than,
                 candidate_address,
                 &candidate.secret_material,
-                &candidate.derived,
+                &candidate.candidate,
                 packed_spending_public_key,
                 options,
                 attempt,
@@ -515,6 +492,60 @@ fn report_progress(
     }
 }
 
+fn report_progress_prefix(
+    worker_id: usize,
+    attempt: u64,
+    candidate_prefix: &str,
+    minimum_lower_than: Option<&RailgunAddress>,
+    options: &AddressSearchOptions,
+    json: bool,
+) {
+    if options.progress_every == 0 || attempt % options.progress_every != 0 || json {
+        return;
+    }
+
+    if let Some(minimum_lower_than) = minimum_lower_than {
+        eprintln!(
+            "Attempts: {attempt} worker: {worker_id} currentAddressPrefix: {candidate_prefix} targetMinimum: {}",
+            minimum_lower_than.as_str(),
+        );
+    } else {
+        eprintln!(
+            "Attempts: {attempt} worker: {worker_id} currentAddressPrefix: {candidate_prefix}",
+        );
+    }
+}
+
+fn candidate_address_prefix(candidate: &SearchCandidateKeys) -> String {
+    let payload = encode_search_payload(candidate);
+    encode_railgun_address_prefix_data(&payload, ALL_CHAINS_ADDRESS_STEM.len() + 12)
+}
+
+fn encode_search_payload(candidate: &SearchCandidateKeys) -> [u8; 73] {
+    let mut payload = [0_u8; 73];
+    payload[0] = 1;
+    let master_bytes = candidate.master_public_key().value().to_bytes_be();
+    let offset = 33 - master_bytes.len();
+    payload[offset..33].copy_from_slice(&master_bytes);
+    let network_id = railgunners_core::encode_network_id(ChainScope::AllChains)
+        .unwrap_or_else(|_| panic!("all-chains network id should encode"));
+    payload[33..41].copy_from_slice(network_id.as_bytes());
+    payload
+}
+
+fn encode_full_address(
+    candidate: &SearchCandidateKeys,
+) -> Result<RailgunAddress, railgunners_core::AddressEncodingError> {
+    let viewing_public_key =
+        railgunners_core::derive_viewing_public_key(candidate.viewing_private_key());
+    encode_railgun_address(
+        1,
+        candidate.master_public_key(),
+        ChainScope::AllChains,
+        &viewing_public_key,
+    )
+}
+
 fn matches_search_filters(
     candidate_address: &RailgunAddress,
     minimum_lower_than: Option<&RailgunAddress>,
@@ -535,21 +566,15 @@ fn matches_search_filters(
 }
 
 fn matches_fast_stem_filters(
-    derived: &crate::workflows::keys::DerivedWalletKeys,
+    candidate: &SearchCandidateKeys,
     options: &AddressSearchOptions,
 ) -> Result<bool, AddressSearchError> {
     let Some(prefix_length) = required_stem_prefix_length(options) else {
         return Ok(true);
     };
 
-    let candidate_prefix = encode_railgun_address_prefix(
-        1,
-        derived.master_public_key(),
-        ChainScope::AllChains,
-        derived.viewing_public_key(),
-        prefix_length,
-    )
-    .map_err(|error| AddressSearchError::AddressEncoding(error.to_string()))?;
+    let payload = encode_search_payload(candidate);
+    let candidate_prefix = encode_railgun_address_prefix_data(&payload, prefix_length);
     let Some(candidate_suffix) = candidate_prefix.as_str().strip_prefix(ALL_CHAINS_ADDRESS_STEM)
     else {
         return Err(AddressSearchError::AddressEncoding(
@@ -580,7 +605,7 @@ fn build_search_match(
     minimum_lower_than: Option<&RailgunAddress>,
     candidate_address: RailgunAddress,
     secret_material: &SearchSecretMaterial,
-    derived: &crate::workflows::keys::DerivedWalletKeys,
+    derived: &SearchCandidateKeys,
     packed_spending_public_key: railgunners_types::PackedSpendingPublicKey,
     options: &AddressSearchOptions,
     attempt: u64,
@@ -596,8 +621,8 @@ fn build_search_match(
         SearchSecretMaterial::Bip39 { phrase, word_count, .. } => {
             (SearchSeedMode::Bip39, Some(phrase.clone()), None, Some(*word_count))
         }
-        SearchSecretMaterial::RawSeed { seed_hex } => {
-            (SearchSeedMode::Raw, None, Some(seed_hex.clone()), None)
+        SearchSecretMaterial::RawSeed { seed } => {
+            (SearchSeedMode::Raw, None, Some(hex::encode(seed)), None)
         }
     };
 
@@ -633,12 +658,11 @@ mod tests {
         SearchSeedMode, count_leading_zeroes, matches_fast_stem_filters, matches_stem_filters,
         search_address_with_generator, search_address_with_seed_generator,
     };
-    use crate::workflows::keys::{derive_wallet_keys, derive_wallet_keys_from_seed};
     use railgunners_core::{
-        Bip39Mnemonic, Bip39WordCount, derive_master_public_key, derive_nullifying_key,
-        derive_spending_node, derive_spending_public_key, derive_viewing_node,
-        derive_viewing_public_key, encode_railgun_address, spending_private_key_from_node,
-        viewing_private_key_from_node,
+        Bip39Mnemonic, Bip39WordCount, SearchCandidateKeys, derive_master_public_key,
+        derive_nullifying_key, derive_spending_node, derive_spending_public_key,
+        derive_viewing_node, derive_viewing_public_key, encode_railgun_address,
+        spending_private_key_from_node, viewing_private_key_from_node,
     };
     use railgunners_types::ChainScope;
     use railgunners_types::RailgunAddress;
@@ -650,6 +674,24 @@ mod tests {
 
     fn address(value: &str) -> RailgunAddress {
         RailgunAddress::parse(value).unwrap_or_else(|_| panic!("test address should parse"))
+    }
+
+    fn expected_address_for(
+        mnemonic: &Bip39Mnemonic,
+        index: u32,
+    ) -> (SearchCandidateKeys, RailgunAddress) {
+        let seed = mnemonic.seed(None);
+        let candidate = railgunners_core::derive_search_keys_from_seed(&seed, index)
+            .unwrap_or_else(|_| panic!("test search key derivation should succeed"));
+        let viewing_public_key = derive_viewing_public_key(candidate.viewing_private_key());
+        let address = encode_railgun_address(
+            1,
+            candidate.master_public_key(),
+            ChainScope::AllChains,
+            &viewing_public_key,
+        )
+        .unwrap_or_else(|_| panic!("test address encoding should succeed"));
+        (candidate, address)
     }
 
     fn candidate_target_greater_than(derived_address: &RailgunAddress) -> RailgunAddress {
@@ -742,15 +784,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
         )
         .unwrap_or_else(|_| panic!("test mnemonic should parse"));
-        let derived = derive_wallet_keys(&mnemonic, 0)
-            .unwrap_or_else(|_| panic!("test wallet derivation should succeed"));
-        let derived_address = encode_railgun_address(
-            1,
-            derived.master_public_key(),
-            ChainScope::AllChains,
-            derived.viewing_public_key(),
-        )
-        .unwrap_or_else(|_| panic!("test address encoding should succeed"));
+        let (_, derived_address) = expected_address_for(&mnemonic, 0);
         let prefix = derived_address
             .as_str()
             .strip_prefix(ALL_CHAINS_ADDRESS_STEM)
@@ -798,15 +832,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
         )
         .unwrap_or_else(|_| panic!("test mnemonic should parse"));
-        let derived = derive_wallet_keys(&mnemonic, 0)
-            .unwrap_or_else(|_| panic!("test wallet derivation should succeed"));
-        let derived_address = encode_railgun_address(
-            1,
-            derived.master_public_key(),
-            ChainScope::AllChains,
-            derived.viewing_public_key(),
-        )
-        .unwrap_or_else(|_| panic!("test address encoding should succeed"));
+        let (_, derived_address) = expected_address_for(&mnemonic, 0);
         let target_address = candidate_target_greater_than(&derived_address);
         let result = deterministic_search_result(vec![target_address.clone()], None, None, None);
 
@@ -832,15 +858,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
         )
         .unwrap_or_else(|_| panic!("test mnemonic should parse"));
-        let derived = derive_wallet_keys(&mnemonic, 0)
-            .unwrap_or_else(|_| panic!("test wallet derivation should succeed"));
-        let derived_address = encode_railgun_address(
-            1,
-            derived.master_public_key(),
-            ChainScope::AllChains,
-            derived.viewing_public_key(),
-        )
-        .unwrap_or_else(|_| panic!("test address encoding should succeed"));
+        let (_, derived_address) = expected_address_for(&mnemonic, 0);
         let prefix = derived_address
             .as_str()
             .strip_prefix(ALL_CHAINS_ADDRESS_STEM)
@@ -868,15 +886,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
         )
         .unwrap_or_else(|_| panic!("test mnemonic should parse"));
-        let derived = derive_wallet_keys(&mnemonic, 0)
-            .unwrap_or_else(|_| panic!("test wallet derivation should succeed"));
-        let derived_address = encode_railgun_address(
-            1,
-            derived.master_public_key(),
-            ChainScope::AllChains,
-            derived.viewing_public_key(),
-        )
-        .unwrap_or_else(|_| panic!("test address encoding should succeed"));
+        let (_, derived_address) = expected_address_for(&mnemonic, 0);
         let suffix = derived_address.as_str()[derived_address.as_str().len() - 4..].to_owned();
 
         let result = deterministic_search_result(Vec::new(), None, None, Some(suffix.clone()));
@@ -900,15 +910,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
         )
         .unwrap_or_else(|_| panic!("test mnemonic should parse"));
-        let derived = derive_wallet_keys(&mnemonic, 0)
-            .unwrap_or_else(|_| panic!("test wallet derivation should succeed"));
-        let derived_address = encode_railgun_address(
-            1,
-            derived.master_public_key(),
-            ChainScope::AllChains,
-            derived.viewing_public_key(),
-        )
-        .unwrap_or_else(|_| panic!("test address encoding should succeed"));
+        let (_, derived_address) = expected_address_for(&mnemonic, 0);
         let stem_suffix = derived_address
             .as_str()
             .strip_prefix(ALL_CHAINS_ADDRESS_STEM)
@@ -938,14 +940,16 @@ mod tests {
     }
 
     fn full_address_matches_stem_filters(
-        derived: &crate::workflows::keys::DerivedWalletKeys,
+        candidate: &SearchCandidateKeys,
         options: &AddressSearchOptions,
     ) -> bool {
+        let viewing_public_key =
+            railgunners_core::derive_viewing_public_key(candidate.viewing_private_key());
         let candidate_address = encode_railgun_address(
             1,
-            derived.master_public_key(),
+            candidate.master_public_key(),
             ChainScope::AllChains,
-            derived.viewing_public_key(),
+            &viewing_public_key,
         )
         .unwrap_or_else(|_| panic!("benchmark address encoding should succeed"));
         let candidate_suffix = candidate_address
@@ -966,8 +970,9 @@ mod tests {
         .unwrap_or_else(|_| panic!("test mnemonic should parse"));
         let derived_keys = (0..ITERATIONS)
             .map(|index| {
-                derive_wallet_keys(&mnemonic, index)
-                    .unwrap_or_else(|_| panic!("benchmark wallet derivation should succeed"))
+                let seed = mnemonic.seed(None);
+                railgunners_core::derive_search_keys_from_seed(&seed, index)
+                    .unwrap_or_else(|_| panic!("benchmark search key derivation should succeed"))
             })
             .collect::<Vec<_>>();
         let options = AddressSearchOptions {
@@ -1037,8 +1042,9 @@ mod tests {
         let fast_start = Instant::now();
         let fast_match_count = (0..ITERATIONS)
             .filter(|index| {
-                let derived = derive_wallet_keys(&mnemonic, *index)
-                    .unwrap_or_else(|_| panic!("benchmark wallet derivation should succeed"));
+                let seed = mnemonic.seed(None);
+                let derived = railgunners_core::derive_search_keys_from_seed(&seed, *index)
+                    .unwrap_or_else(|_| panic!("benchmark search key derivation should succeed"));
                 black_box(
                     matches_fast_stem_filters(&derived, &options)
                         .unwrap_or_else(|_| panic!("fast stem filtering should succeed")),
@@ -1050,8 +1056,9 @@ mod tests {
         let full_start = Instant::now();
         let full_match_count = (0..ITERATIONS)
             .filter(|index| {
-                let derived = derive_wallet_keys(&mnemonic, *index)
-                    .unwrap_or_else(|_| panic!("benchmark wallet derivation should succeed"));
+                let seed = mnemonic.seed(None);
+                let derived = railgunners_core::derive_search_keys_from_seed(&seed, *index)
+                    .unwrap_or_else(|_| panic!("benchmark search key derivation should succeed"));
                 black_box(full_address_matches_stem_filters(&derived, &options))
             })
             .count();
@@ -1098,7 +1105,7 @@ mod tests {
         let match_count = seeds
             .iter()
             .filter(|seed| {
-                let derived = derive_wallet_keys_from_seed(&seed[..], 0)
+                let derived = railgunners_core::derive_search_keys_from_seed(&seed[..], 0)
                     .unwrap_or_else(|_| panic!("raw seed derivation should succeed"));
                 black_box(
                     matches_fast_stem_filters(&derived, &options)

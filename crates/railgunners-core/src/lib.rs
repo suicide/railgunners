@@ -30,7 +30,7 @@ use railgunners_types::{Address, ChainId, TxHash};
 
 pub use address::{
     AddressDecodingError, AddressEncodingError, decode_railgun_address, encode_railgun_address,
-    encode_railgun_address_prefix,
+    encode_railgun_address_prefix, encode_railgun_address_prefix_data,
 };
 pub use bip39::{Bip39Error, Bip39Mnemonic, Bip39WordCount};
 pub use blinding::{BlindingError, derive_note_blinding_keys, unblind_note_key};
@@ -67,14 +67,15 @@ pub use event::{
 pub use field::parse_canonical_field_bytes;
 pub use hd::{
     DerivationPath, HardenedIndex, KeyDerivationError, WalletNode, derive_master_node, derive_node,
-    derive_node_from_str, derive_spending_node, derive_viewing_node, spending_path, viewing_path,
+    derive_node_from_str, derive_spending_and_viewing_nodes, derive_spending_node,
+    derive_viewing_node, spending_path, viewing_path,
 };
 pub use keys::{
-    build_wallet_scan_key_bundle, derive_master_public_key, derive_nullifying_key,
-    derive_nullifying_key_from_bytes, derive_spending_key_pair, derive_spending_public_key,
-    derive_spending_public_key_from_bytes, derive_viewing_key_pair, derive_viewing_public_key,
-    derive_viewing_public_key_from_bytes, spending_private_key_from_node,
-    viewing_private_key_from_node,
+    SearchCandidateKeys, build_wallet_scan_key_bundle, derive_master_public_key,
+    derive_nullifying_key, derive_nullifying_key_from_bytes, derive_search_keys_from_seed,
+    derive_spending_key_pair, derive_spending_public_key, derive_spending_public_key_from_bytes,
+    derive_viewing_key_pair, derive_viewing_public_key, derive_viewing_public_key_from_bytes,
+    spending_private_key_from_node, viewing_private_key_from_node,
 };
 pub use merkle::{MerkleProofError, create_dummy_merkle_proof, verify_merkle_proof};
 pub use network_id::{NetworkIdError, decode_network_id, encode_network_id};

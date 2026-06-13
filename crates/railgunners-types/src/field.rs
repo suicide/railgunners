@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use num_bigint::BigUint;
 
 use crate::ParseDomainError;
@@ -13,10 +15,14 @@ pub const BN254_SCALAR_FIELD_MODULUS_BYTES: [u8; 32] = [
     0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91, 0x43, 0xe1, 0xf5, 0x93, 0xf0, 0x00, 0x00, 0x01,
 ];
 
-/// Returns the canonical BN254 scalar-field modulus as a `BigUint`.
+static BN254_SCALAR_FIELD_MODULUS: OnceLock<BigUint> = OnceLock::new();
+
+/// Returns a clone of the canonical BN254 scalar-field modulus.
 #[must_use]
 pub fn bn254_scalar_field_modulus() -> BigUint {
-    BigUint::from_bytes_be(&BN254_SCALAR_FIELD_MODULUS_BYTES)
+    BN254_SCALAR_FIELD_MODULUS
+        .get_or_init(|| BigUint::from_bytes_be(&BN254_SCALAR_FIELD_MODULUS_BYTES))
+        .clone()
 }
 
 pub(crate) fn validate_bn254_scalar(
