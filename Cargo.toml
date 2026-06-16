@@ -26,7 +26,7 @@ railgunners-poi = { path = "crates/railgunners-poi" }
 railgunners-prover = { path = "crates/railgunners-prover" }
 railgunners-types = { path = "crates/railgunners-types" }
 railgunners-core = { path = "crates/railgunners-core" }
-bech32 = "0.11.1"
+bech32 = "0.12.0"
 num-bigint = "0.4.6"
 serde = { version = "1.0.228", features = ["derive"] }
 
