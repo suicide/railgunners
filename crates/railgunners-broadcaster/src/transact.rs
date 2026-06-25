@@ -400,13 +400,24 @@ fn parse_merkle_root(value: &str) -> Result<MerkleRoot, BroadcasterError> {
 }
 
 fn parse_railgun_txid(value: &str) -> Result<RailgunTxid, BroadcasterError> {
-    RailgunTxid::new(num_bigint::BigUint::from_bytes_be(&decode_hex_exact::<32>(value)?)).map_err(
-        |_| {
-            BroadcasterError::InvalidTransactPoiBundle(
-                "railgunTxidIfHasUnshield must be canonical BN254 field bytes".into(),
-            )
-        },
-    )
+    let trimmed = value.strip_prefix("0x").unwrap_or(value);
+    let bytes = hex::decode(trimmed).map_err(|_| {
+        BroadcasterError::InvalidTransactPoiBundle(
+            "railgunTxidIfHasUnshield must be canonical hex".into(),
+        )
+    })?;
+    if bytes.len() > 32 {
+        return Err(BroadcasterError::InvalidTransactPoiBundle(
+            "railgunTxidIfHasUnshield must be at most 32 bytes".into(),
+        ));
+    }
+    let mut padded = [0_u8; 32];
+    padded[32 - bytes.len()..].copy_from_slice(&bytes);
+    RailgunTxid::new(num_bigint::BigUint::from_bytes_be(&padded)).map_err(|_| {
+        BroadcasterError::InvalidTransactPoiBundle(
+            "railgunTxidIfHasUnshield must be canonical BN254 field bytes".into(),
+        )
+    })
 }
 
 fn parse_pre_transaction_poi(

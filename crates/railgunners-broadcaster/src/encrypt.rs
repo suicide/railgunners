@@ -67,7 +67,7 @@ fn derive_transact_shared_key_from_point(
     private_key: &ViewingPrivateKey,
     point: &curve25519_dalek::edwards::EdwardsPoint,
 ) -> [u8; 32] {
-    (point * ed25519_private_scalar(private_key)).compress().to_bytes()
+    (point * ed25519_private_scalar(private_key)).to_montgomery().to_bytes()
 }
 
 fn derive_transact_shared_key_for_encryption(
