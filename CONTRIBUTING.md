@@ -111,6 +111,19 @@ Public APIs should aim to be:
 
 Avoid designing APIs around the shape of one external vendor library.
 
+### Module-Scoped Naming
+
+A public item's fully-qualified path is `crate::module::item`. The module segment
+already scopes the item. Function and type names should not repeat words the module
+segment already carries.
+
+When adding new functionality, prefer creating a module to scope related items rather
+than adding long flat names at crate root. When a module groups operations around one
+domain concept, the module name provides the context. Function names describe only the
+action and what differentiates them from sibling functions in that module.
+
+Keep module names to 1–2 words and public function names to 1–3 words.
+
 ## Documentation Expectations
 
 When making architectural or cross-cutting changes, update the relevant docs.

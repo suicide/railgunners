@@ -58,6 +58,7 @@ Changes are not complete until the smallest relevant crate-level checks pass. Ru
 - Must avoid exposing secrets or privacy-sensitive material through unsafe convenience APIs.
 - Should prefer `core` over `std` in reusable/core code where practical.
 - Should avoid new crates or heavy dependencies unless a real boundary justifies them.
+- Should use module-scoped naming: when adding new functionality, prefer creating a module to scope related items rather than adding long flat names. Prefer `payments::invoice::send(…)` to `send_payments_invoice(…)`.
 - Never bypass the architecture constitution to satisfy a task; surface the conflict instead.
 
 ## Links to deeper docs
