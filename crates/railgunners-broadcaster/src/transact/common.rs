@@ -265,9 +265,17 @@ impl BroadcasterRawParamsTransactCommon {
 // Wire types (private)
 // ---------------------------------------------------------------------------
 
+fn default_transact_type() -> String {
+    "COMMON".to_owned()
+}
+
+fn default_version() -> String {
+    "0.0.0".to_owned()
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct BroadcasterRawParamsTransactCommonWire {
-    #[serde(rename = "transactType")]
+    #[serde(rename = "transactType", default = "default_transact_type")]
     transact_type: String,
     #[serde(rename = "txidVersion")]
     txid_version: String,
@@ -279,15 +287,15 @@ struct BroadcasterRawParamsTransactCommonWire {
     fees_id: String,
     #[serde(rename = "broadcasterViewingKey")]
     broadcaster_viewing_key: String,
-    #[serde(rename = "devLog")]
+    #[serde(rename = "devLog", default)]
     dev_log: bool,
-    #[serde(rename = "minVersion")]
+    #[serde(rename = "minVersion", default = "default_version")]
     min_version: String,
-    #[serde(rename = "maxVersion")]
+    #[serde(rename = "maxVersion", default = "default_version")]
     max_version: String,
     to: String,
     data: String,
-    #[serde(rename = "useRelayAdapt")]
+    #[serde(rename = "useRelayAdapt", default)]
     use_relay_adapt: bool,
     #[serde(rename = "minGasPrice")]
     min_gas_price: String,
