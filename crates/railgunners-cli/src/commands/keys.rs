@@ -12,7 +12,8 @@ use crate::{
         pack_derived_spending_public_key,
     },
 };
-use railgunners_types::{NullifyingKey, SpendingPublicKey};
+use railgunners_core::{encode_railgun_address, encode_shareable_viewing_key};
+use railgunners_types::{ChainScope, NullifyingKey, ShareableViewingKeyData, SpendingPublicKey};
 use serde::Serialize;
 use std::io::Write;
 
@@ -141,11 +142,37 @@ fn execute_derive(
     let packed_spending_public_key =
         pack_derived_spending_public_key(derived.spending_public_key())
             .map_err(|error| CliError::command(error.to_string(), json))?;
+    let shareable_viewing_key = encode_shareable_viewing_key(&ShareableViewingKeyData::new(
+        *derived.viewing_private_key(),
+        packed_spending_public_key,
+    ))
+    .map_err(|error| CliError::command(error.to_string(), json))?;
+    let address = encode_railgun_address(
+        1,
+        derived.master_public_key(),
+        ChainScope::AllChains,
+        derived.viewing_public_key(),
+    )
+    .map_err(|error| CliError::command(error.to_string(), json))?;
 
     if json {
-        write_json(stdout, &DerivedKeysJson::from_derived(&derived, &packed_spending_public_key))?;
+        write_json(
+            stdout,
+            &DerivedKeysJson::from_derived(
+                &derived,
+                &packed_spending_public_key,
+                &shareable_viewing_key,
+                address.as_str(),
+            ),
+        )?;
     } else {
-        write_derived_keys(stdout, &derived, &packed_spending_public_key)?;
+        write_derived_keys(
+            stdout,
+            &derived,
+            &packed_spending_public_key,
+            &shareable_viewing_key,
+            address.as_str(),
+        )?;
     }
 
     Ok(())
@@ -155,6 +182,8 @@ fn write_derived_keys(
     stdout: &mut dyn Write,
     derived: &DerivedWalletKeys,
     packed_spending_public_key: &railgunners_types::PackedSpendingPublicKey,
+    shareable_viewing_key: &str,
+    address: &str,
 ) -> Result<(), CliError> {
     writeln!(stdout, "index: {}", derived.index())?;
     writeln!(stdout, "spendingPath: {}", derived.spending_path())?;
@@ -179,6 +208,8 @@ fn write_derived_keys(
     writeln!(stdout, "viewingPublicKey: {}", hex::encode(derived.viewing_public_key().as_bytes()))?;
     writeln!(stdout, "nullifyingKey: {}", derived.nullifying_key().value())?;
     writeln!(stdout, "masterPublicKey: {}", derived.master_public_key().value())?;
+    writeln!(stdout, "shareableViewingKey: {shareable_viewing_key}")?;
+    writeln!(stdout, "address: {address}")?;
     Ok(())
 }
 
@@ -215,12 +246,17 @@ struct DerivedKeysJson {
     nullifying_key: String,
     #[serde(rename = "masterPublicKey")]
     master_public_key: String,
+    #[serde(rename = "shareableViewingKey")]
+    shareable_viewing_key: String,
+    address: String,
 }
 
 impl DerivedKeysJson {
     fn from_derived(
         derived: &DerivedWalletKeys,
         packed_spending_public_key: &railgunners_types::PackedSpendingPublicKey,
+        shareable_viewing_key: &str,
+        address: &str,
     ) -> Self {
         Self {
             index: derived.index(),
@@ -233,6 +269,8 @@ impl DerivedKeysJson {
             viewing_public_key: hex::encode(derived.viewing_public_key().as_bytes()),
             nullifying_key: derived.nullifying_key().value().to_string(),
             master_public_key: derived.master_public_key().value().to_string(),
+            shareable_viewing_key: shareable_viewing_key.to_owned(),
+            address: address.to_owned(),
         }
     }
 }
@@ -282,7 +320,7 @@ mod tests {
         assert_eq!(exit_code, 0);
         assert_eq!(
             String::from_utf8_lossy(&stdout),
-            "{\"index\":0,\"spendingPath\":\"m/44'/1984'/0'/0'/0'\",\"viewingPath\":\"m/420'/1984'/0'/0'/0'\",\"spendingPrivateKey\":\"08b2d974aa7fffd9d068b78c34434c534ddcd9343fcbf5aa12cf78e1a3c1ccb9\",\"spendingPublicKey\":{\"x\":\"21725194683971601625357993914711234354000760307317172095138789827480990690892\",\"y\":\"18185059732936663794890181151638097537207598791675324797050194801074344044960\"},\"packedSpendingPublicKey\":\"a029cc8b973c5ee7d592c5fbeb2d5e063908ebc8c0ed64a639e7c91e0a6134a8\",\"viewingPrivateKey\":\"9a9e1ca3b9476dc8500b43f30f34104c92a3eedfd727757ffd0ad15da8e11572\",\"viewingPublicKey\":\"df2dfb942aa6fb8cf9fe60d7984cd10b20b59027e677ecb4960d764f7d42408a\",\"nullifyingKey\":\"11357301776152573321369788690304620243322420398401862164527624501081803879965\",\"masterPublicKey\":\"19349903103956176070235423774157995896840157182198600174309409106416294821789\"}\n"
+            "{\"index\":0,\"spendingPath\":\"m/44'/1984'/0'/0'/0'\",\"viewingPath\":\"m/420'/1984'/0'/0'/0'\",\"spendingPrivateKey\":\"08b2d974aa7fffd9d068b78c34434c534ddcd9343fcbf5aa12cf78e1a3c1ccb9\",\"spendingPublicKey\":{\"x\":\"21725194683971601625357993914711234354000760307317172095138789827480990690892\",\"y\":\"18185059732936663794890181151638097537207598791675324797050194801074344044960\"},\"packedSpendingPublicKey\":\"a029cc8b973c5ee7d592c5fbeb2d5e063908ebc8c0ed64a639e7c91e0a6134a8\",\"viewingPrivateKey\":\"9a9e1ca3b9476dc8500b43f30f34104c92a3eedfd727757ffd0ad15da8e11572\",\"viewingPublicKey\":\"df2dfb942aa6fb8cf9fe60d7984cd10b20b59027e677ecb4960d764f7d42408a\",\"nullifyingKey\":\"11357301776152573321369788690304620243322420398401862164527624501081803879965\",\"masterPublicKey\":\"19349903103956176070235423774157995896840157182198600174309409106416294821789\",\"shareableViewingKey\":\"82a57670726976c4209a9e1ca3b9476dc8500b43f30f34104c92a3eedfd727757ffd0ad15da8e11572a473707562c420a029cc8b973c5ee7d592c5fbeb2d5e063908ebc8c0ed64a639e7c91e0a6134a8\",\"address\":\"0zk1qy4v02p5zkq0zfpaxhz79j5tslrv8c44d80d8jr2fuecrtxlp8lemrv7j6fe3z53ll0jm7u592n0hr8elesd0xzv6y9jpdvsyln80m95jcxhvnmagfqg5p6e9mp\"}\n"
         );
         assert!(stderr.is_empty());
     }
@@ -329,7 +367,7 @@ mod tests {
         assert_eq!(exit_code, 0);
         assert_eq!(
             String::from_utf8_lossy(&stdout),
-            "{\"index\":0,\"spendingPath\":\"m/44'/1984'/0'/0'/0'\",\"viewingPath\":\"m/420'/1984'/0'/0'/0'\",\"spendingPrivateKey\":\"08b2d974aa7fffd9d068b78c34434c534ddcd9343fcbf5aa12cf78e1a3c1ccb9\",\"spendingPublicKey\":{\"x\":\"21725194683971601625357993914711234354000760307317172095138789827480990690892\",\"y\":\"18185059732936663794890181151638097537207598791675324797050194801074344044960\"},\"packedSpendingPublicKey\":\"a029cc8b973c5ee7d592c5fbeb2d5e063908ebc8c0ed64a639e7c91e0a6134a8\",\"viewingPrivateKey\":\"9a9e1ca3b9476dc8500b43f30f34104c92a3eedfd727757ffd0ad15da8e11572\",\"viewingPublicKey\":\"df2dfb942aa6fb8cf9fe60d7984cd10b20b59027e677ecb4960d764f7d42408a\",\"nullifyingKey\":\"11357301776152573321369788690304620243322420398401862164527624501081803879965\",\"masterPublicKey\":\"19349903103956176070235423774157995896840157182198600174309409106416294821789\"}\n"
+            "{\"index\":0,\"spendingPath\":\"m/44'/1984'/0'/0'/0'\",\"viewingPath\":\"m/420'/1984'/0'/0'/0'\",\"spendingPrivateKey\":\"08b2d974aa7fffd9d068b78c34434c534ddcd9343fcbf5aa12cf78e1a3c1ccb9\",\"spendingPublicKey\":{\"x\":\"21725194683971601625357993914711234354000760307317172095138789827480990690892\",\"y\":\"18185059732936663794890181151638097537207598791675324797050194801074344044960\"},\"packedSpendingPublicKey\":\"a029cc8b973c5ee7d592c5fbeb2d5e063908ebc8c0ed64a639e7c91e0a6134a8\",\"viewingPrivateKey\":\"9a9e1ca3b9476dc8500b43f30f34104c92a3eedfd727757ffd0ad15da8e11572\",\"viewingPublicKey\":\"df2dfb942aa6fb8cf9fe60d7984cd10b20b59027e677ecb4960d764f7d42408a\",\"nullifyingKey\":\"11357301776152573321369788690304620243322420398401862164527624501081803879965\",\"masterPublicKey\":\"19349903103956176070235423774157995896840157182198600174309409106416294821789\",\"shareableViewingKey\":\"82a57670726976c4209a9e1ca3b9476dc8500b43f30f34104c92a3eedfd727757ffd0ad15da8e11572a473707562c420a029cc8b973c5ee7d592c5fbeb2d5e063908ebc8c0ed64a639e7c91e0a6134a8\",\"address\":\"0zk1qy4v02p5zkq0zfpaxhz79j5tslrv8c44d80d8jr2fuecrtxlp8lemrv7j6fe3z53ll0jm7u592n0hr8elesd0xzv6y9jpdvsyln80m95jcxhvnmagfqg5p6e9mp\"}\n"
         );
         assert!(stderr.is_empty());
     }

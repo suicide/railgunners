@@ -136,7 +136,7 @@ Notes:
 - `keys derive` defaults `--index` to `0`
 - `keys derive` requires exactly one of `--mnemonic` or `--raw-seed`
 - `keys derive` requires `--show-secrets` because it emits private keys
-- `keys derive` also emits `packedSpendingPublicKey` so it can feed `viewing-key encode`
+- `keys derive` also emits `packedSpendingPublicKey`, `shareableViewingKey`, and the all-chains `0zk` `address`
 - `address search --seed-mode raw` output can be ingested directly with `keys derive --raw-seed`
 - `inspect-viewing-private` derives `viewingPublicKey` and `nullifyingKey`
 - `inspect-spending-private` derives `spendingPublicKey`
