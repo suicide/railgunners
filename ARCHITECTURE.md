@@ -73,6 +73,14 @@ Examples include:
 
 `railgunners-core` should not become a grab bag. If a subsystem develops meaningful complexity, it should graduate into its own crate.
 
+#### Protocol Serialization Placement
+
+Canonical protocol serialization and decoding, including contract calldata
+decoding, belongs in `railgunners-core` behind narrow, strongly-typed module
+APIs. Narrow encoding dependencies such as `alloy-sol-types` and
+`alloy-primitives` may be used internally when the protocol itself requires
+them, but decoded vendor ABI types must not leak through public interfaces.
+
 #### Crypto Backend Placement
 
 Protocol-critical cryptographic backends that are required for shared core behavior may live inside `railgunners-core` when they are implementation details of the core protocol surface rather than reusable products of their own.

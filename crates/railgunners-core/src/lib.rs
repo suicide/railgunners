@@ -24,6 +24,7 @@ pub mod shareable_viewing_key;
 pub mod shared_key;
 pub mod shield_ciphertext;
 pub mod token;
+pub mod transaction_call;
 pub mod transaction_commitment;
 
 use railgunners_types::{Address, ChainId, TxHash};

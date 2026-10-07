@@ -30,6 +30,13 @@ Current note-modeling behavior includes sender-visibility rules used during note
 - visible sender: missing or all-zero-sentinel `senderRandom` means `encodedMPK = receiverMPK XOR senderMPK`
 - low-level sender recovery treats missing `senderRandom` as visible mode, but V2 received-note reconstruction preserves the upstream ambiguity rule when plaintext omits `senderRandom` and `encodedMPK == receiverMPK`
 
+Transaction-call decoding is available from `railgunners_core::transaction_call`:
+
+- `decode(&[u8])` matches the exact V2 `transact` (`0xd8ae136a`), V2 `relay` (`0x28223a77`), and V3 `execute` (`0x3474c6fe`) selectors and returns ordered `VersionedTransaction` output projections.
+- Decoding is strict ABI decoding: the full payload is validated and re-encoded byte-for-byte, so trailing bytes, non-canonical offsets, and non-zero padding are rejected along with unknown selectors, including 7702-style `execute` and `multicall`.
+- It is deliberately not a lossless call serializer: relay actions, V3 shield requests, global bound params, and proofs are not exposed, and no proof, destination-authorization, fee, or decryption policy is applied.
+- Empty commitment lists, empty ciphertext lists, and mismatched counts are preserved so consumers can classify missing payment material themselves.
+
 ## Workspace
 
 The current workspace includes:

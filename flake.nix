@@ -59,6 +59,7 @@
             (craneLib.filterCargoSources path type)
             || (pkgs.lib.hasInfix "/crates/railgunners-artifacts/data/" path)
             || (pkgs.lib.hasInfix "/crates/railgunners-core/testdata/poseidon/" path)
+            || (pkgs.lib.hasInfix "/crates/railgunners-core/testdata/transaction_call/" path)
             || (pkgs.lib.hasInfix "/crates/railgunners-core/src/crypto/poseidon/" path);
         };
         commonArgs = {
