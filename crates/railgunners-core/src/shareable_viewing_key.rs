@@ -86,7 +86,7 @@ fn encode_hex(bytes: &[u8]) -> String {
 
 fn decode_hex(value: &str) -> Result<Vec<u8>, ShareableViewingKeyError> {
     let bytes = value.as_bytes();
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(ShareableViewingKeyError::InvalidHex);
     }
 

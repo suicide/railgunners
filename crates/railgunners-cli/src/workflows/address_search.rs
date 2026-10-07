@@ -343,10 +343,10 @@ where
             }
             Err(_) => {
                 let attempt_count = attempts.load(Ordering::Relaxed);
-                if let Some(max_attempts) = options.max_attempts {
-                    if attempt_count >= max_attempts {
-                        return Err(AddressSearchError::MaxAttemptsExceeded(max_attempts));
-                    }
+                if let Some(max_attempts) = options.max_attempts
+                    && attempt_count >= max_attempts
+                {
+                    return Err(AddressSearchError::MaxAttemptsExceeded(max_attempts));
                 }
                 Err(AddressSearchError::WorkerFailure)
             }
@@ -375,7 +375,7 @@ fn worker_loop<F>(
     while !stop.load(Ordering::Relaxed) {
         let attempt = attempts.fetch_add(1, Ordering::Relaxed) + 1;
         let should_report_progress =
-            options.progress_every != 0 && attempt % options.progress_every == 0;
+            options.progress_every != 0 && attempt.is_multiple_of(options.progress_every);
         if options.max_attempts.is_some_and(|max_attempts| attempt > max_attempts) {
             return;
         }
@@ -474,7 +474,7 @@ fn report_progress(
     options: &AddressSearchOptions,
     json: bool,
 ) {
-    if options.progress_every == 0 || attempt % options.progress_every != 0 || json {
+    if options.progress_every == 0 || !attempt.is_multiple_of(options.progress_every) || json {
         return;
     }
 
@@ -500,7 +500,7 @@ fn report_progress_prefix(
     options: &AddressSearchOptions,
     json: bool,
 ) {
-    if options.progress_every == 0 || attempt % options.progress_every != 0 || json {
+    if options.progress_every == 0 || !attempt.is_multiple_of(options.progress_every) || json {
         return;
     }
 

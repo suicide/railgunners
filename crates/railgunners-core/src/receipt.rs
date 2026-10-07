@@ -149,13 +149,13 @@ where
             continue;
         };
 
-        if let Some(log_transaction_hash) = log.transaction_hash {
-            if log_transaction_hash != receipt.transaction_hash() {
-                return Err(ReceiptInspectionError::TransactionHashMismatch {
-                    receipt_transaction_hash: receipt.transaction_hash(),
-                    log_transaction_hash,
-                });
-            }
+        if let Some(log_transaction_hash) = log.transaction_hash
+            && log_transaction_hash != receipt.transaction_hash()
+        {
+            return Err(ReceiptInspectionError::TransactionHashMismatch {
+                receipt_transaction_hash: receipt.transaction_hash(),
+                log_transaction_hash,
+            });
         }
 
         ordered_events.extend(decode_raw_railgun_log(version, log)?);
