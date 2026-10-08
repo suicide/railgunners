@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use aes_gcm::{
     AesGcm,
-    aead::{AeadInPlace, KeyInit, OsRng, generic_array::GenericArray, rand_core::RngCore},
+    aead::{AeadInOut, KeyInit, Nonce, Tag},
     aes::Aes256,
 };
 use curve25519_dalek::{edwards::CompressedEdwardsY, scalar::Scalar};
@@ -764,11 +764,11 @@ fn decrypt_payload(
     let cipher = Aes256Gcm16::new_from_slice(shared_key)
         .map_err(|_| BroadcasterError::TransactDecryptionFailed)?;
     cipher
-        .decrypt_in_place_detached(
-            GenericArray::from_slice(&iv),
+        .decrypt_inout_detached(
+            &Nonce::<Aes256Gcm16>::from(iv),
             b"",
-            &mut ciphertext,
-            &GenericArray::clone_from_slice(&tag),
+            ciphertext.as_mut_slice().into(),
+            &Tag::<Aes256Gcm16>::from(tag),
         )
         .map_err(|_| BroadcasterError::TransactDecryptionFailed)?;
 
@@ -809,7 +809,8 @@ pub fn encrypt(
     payload: &BroadcasterRawParamsTransactCommon,
 ) -> Result<BroadcasterTransactEnvelope, BroadcasterError> {
     let mut ephemeral_private_key = [0_u8; ViewingPrivateKey::LENGTH];
-    OsRng.fill_bytes(&mut ephemeral_private_key);
+    getrandom::fill(&mut ephemeral_private_key)
+        .map_err(|_| BroadcasterError::TransactEncryptionFailed)?;
     encrypt_with_key(
         broadcaster_viewing_key,
         payload,
@@ -830,7 +831,7 @@ pub fn encrypt_with_key(
     ephemeral_private_key: &ViewingPrivateKey,
 ) -> Result<BroadcasterTransactEnvelope, BroadcasterError> {
     let mut iv = [0_u8; IV_LENGTH];
-    OsRng.fill_bytes(&mut iv);
+    getrandom::fill(&mut iv).map_err(|_| BroadcasterError::TransactEncryptionFailed)?;
     encrypt_with_iv(broadcaster_viewing_key, payload, ephemeral_private_key, iv)
 }
 
@@ -851,7 +852,11 @@ pub fn encrypt_data(
         .map_err(|_| BroadcasterError::TransactEncryptionFailed)?;
     let mut encrypted = data.to_vec();
     let tag = cipher
-        .encrypt_in_place_detached(GenericArray::from_slice(&iv), b"", &mut encrypted)
+        .encrypt_inout_detached(
+            &Nonce::<Aes256Gcm16>::from(iv),
+            b"",
+            encrypted.as_mut_slice().into(),
+        )
         .map_err(|_| BroadcasterError::TransactEncryptionFailed)?;
 
     Ok(BroadcasterEncryptedData::new([
@@ -922,7 +927,7 @@ pub fn decrypt_envelope(
 mod tests {
     use aes_gcm::{
         AesGcm,
-        aead::{AeadInPlace, KeyInit, generic_array::GenericArray},
+        aead::{AeadInOut, KeyInit, Nonce, Tag},
         aes::Aes256,
     };
     use curve25519_dalek::edwards::CompressedEdwardsY;
@@ -1018,13 +1023,12 @@ mod tests {
 
         let cipher = Aes256Gcm16::new_from_slice(&shared_key)
             .unwrap_or_else(|_| panic!("cipher should initialize"));
+        let nonce = Nonce::<Aes256Gcm16>::try_from(iv.as_slice())
+            .unwrap_or_else(|_| panic!("iv should be a valid nonce"));
+        let tag = Tag::<Aes256Gcm16>::try_from(tag.as_slice())
+            .unwrap_or_else(|_| panic!("tag should be a valid aead tag"));
         cipher
-            .decrypt_in_place_detached(
-                GenericArray::from_slice(&iv),
-                b"",
-                &mut encrypted,
-                &GenericArray::clone_from_slice(&tag),
-            )
+            .decrypt_inout_detached(&nonce, b"", encrypted.as_mut_slice().into(), &tag)
             .unwrap_or_else(|_| panic!("ciphertext should decrypt"));
 
         String::from_utf8(encrypted)

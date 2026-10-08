@@ -4,7 +4,7 @@ use core::fmt;
 
 use aes_gcm::{
     AesGcm,
-    aead::{AeadInPlace, KeyInit, OsRng, generic_array::GenericArray, rand_core::RngCore},
+    aead::{AeadInOut, KeyInit, Nonce, Tag},
     aes::Aes256,
 };
 use railgunners_types::{
@@ -59,7 +59,11 @@ fn encrypt_v2_ciphertext_with_iv(
         .map_err(|_| V2CiphertextError::EncryptFailed)?;
     let mut encrypted = encode_v2_plaintext(plaintext);
     let tag = cipher
-        .encrypt_in_place_detached(GenericArray::from_slice(&iv), b"", &mut encrypted)
+        .encrypt_inout_detached(
+            &Nonce::<Aes256Gcm16>::from(iv),
+            b"",
+            encrypted.as_mut_slice().into(),
+        )
         .map_err(|_| V2CiphertextError::EncryptFailed)?;
 
     let data: [V2CiphertextBlock; DATA_BLOCK_COUNT] = core::array::from_fn(|index| {
@@ -125,7 +129,7 @@ pub fn encrypt_v2_ciphertext(
     annotation_data: Vec<u8>,
 ) -> Result<V2CiphertextBundle, V2CiphertextError> {
     let mut iv = [0_u8; IV_LENGTH];
-    OsRng.fill_bytes(&mut iv);
+    getrandom::fill(&mut iv).map_err(|_| V2CiphertextError::EncryptFailed)?;
     encrypt_v2_ciphertext_with_iv(plaintext, shared_key, annotation_data, iv)
 }
 
@@ -142,9 +146,10 @@ pub fn decrypt_v2_ciphertext(
         .map_err(|_| V2CiphertextError::AuthenticationFailed)?;
     let mut iv = [0_u8; IV_LENGTH];
     iv.copy_from_slice(&bundle.iv_tag().as_bytes()[..IV_LENGTH]);
-    let tag = GenericArray::clone_from_slice(
+    let tag = Tag::<Aes256Gcm16>::try_from(
         &bundle.iv_tag().as_bytes()[IV_LENGTH..IV_LENGTH + TAG_LENGTH],
-    );
+    )
+    .map_err(|_| V2CiphertextError::AuthenticationFailed)?;
 
     let mut encrypted = Vec::with_capacity(FIXED_PLAINTEXT_LENGTH + bundle.memo().len());
     for block in bundle.data() {
@@ -153,7 +158,12 @@ pub fn decrypt_v2_ciphertext(
     encrypted.extend_from_slice(bundle.memo());
 
     cipher
-        .decrypt_in_place_detached(GenericArray::from_slice(&iv), b"", &mut encrypted, &tag)
+        .decrypt_inout_detached(
+            &Nonce::<Aes256Gcm16>::from(iv),
+            b"",
+            encrypted.as_mut_slice().into(),
+            &tag,
+        )
         .map_err(|_| V2CiphertextError::AuthenticationFailed)?;
     decode_v2_plaintext(&encrypted)
 }

@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use ark_bn254::Fr;
+use ark_ff::PrimeField;
 use num_bigint::BigUint;
 use num_traits::Num;
 use serde::Deserialize;
@@ -72,5 +73,5 @@ fn parse_field(value: &str) -> Fr {
     let field = BigUint::from_str_radix(trimmed, 16).unwrap_or_else(|error| {
         panic!("poseidon constant should parse as hex field element: {error}")
     });
-    Fr::from(field)
+    Fr::from_be_bytes_mod_order(&field.to_bytes_be())
 }

@@ -4,7 +4,7 @@ use core::fmt;
 
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
-    aead::{AeadInPlace, KeyInit, OsRng, rand_core::RngCore},
+    aead::{AeadInOut, KeyInit},
 };
 use railgunners_types::{
     MasterPublicKey, NoteRandom, NoteValue, SenderRandom, SharedSymmetricKey, TokenHash,
@@ -65,7 +65,7 @@ fn encrypt_v3_bytes_with_nonce(
     let derived_nonce = derive_cipher_nonce(nonce);
     let mut encrypted = plaintext.to_vec();
     cipher
-        .encrypt_in_place(XNonce::from_slice(&derived_nonce), b"", &mut encrypted)
+        .encrypt_in_place(&XNonce::from(derived_nonce), b"", &mut encrypted)
         .map_err(|_| V3CiphertextError::EncryptFailed)?;
     Ok(encrypted)
 }
@@ -132,7 +132,7 @@ pub fn encrypt_v3_ciphertext(
     sender_ciphertext: Vec<u8>,
 ) -> Result<V3CiphertextBundle, V3CiphertextError> {
     let mut nonce = [0_u8; STORED_NONCE_LENGTH];
-    OsRng.fill_bytes(&mut nonce);
+    getrandom::fill(&mut nonce).map_err(|_| V3CiphertextError::EncryptFailed)?;
     encrypt_v3_ciphertext_with_nonce(
         plaintext,
         shared_key,
@@ -156,7 +156,7 @@ pub fn decrypt_v3_ciphertext(
     let mut encrypted = bundle.bundle().to_vec();
 
     cipher
-        .decrypt_in_place(XNonce::from_slice(&derived_nonce), b"", &mut encrypted)
+        .decrypt_in_place(&XNonce::from(derived_nonce), b"", &mut encrypted)
         .map_err(|_| V3CiphertextError::AuthenticationFailed)?;
     decode_v3_plaintext(&encrypted)
 }

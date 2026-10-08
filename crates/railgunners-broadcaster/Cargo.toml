@@ -11,9 +11,10 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-aes-gcm = "0.10.3"
+aes-gcm = "0.11.1"
 curve25519-dalek = "5.0.0"
 ed25519-dalek = "3.0.0"
+getrandom = "0.4.3"
 hex = "0.4.3"
 num-bigint.workspace = true
 railgunners-core.workspace = true

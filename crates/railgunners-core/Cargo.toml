@@ -11,7 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-aes-gcm = "0.10.3"
+aes-gcm = "0.11.1"
 alloy-primitives = "1.5.7"
 alloy-sol-types = "1.5.7"
 ark-bn254 = "0.6.0"
@@ -19,9 +19,10 @@ ark-ff = "0.6.0"
 bech32.workspace = true
 blake-hash = "0.4.1"
 bip39 = { version = "3.0.0", features = ["rand"] }
-chacha20poly1305 = "0.10.1"
+chacha20poly1305 = "0.11.0"
 curve25519-dalek = "5.0.0"
 ed25519-dalek = "3.0.0"
+getrandom = "0.4.3"
 hmac = "0.13.0"
 num-bigint.workspace = true
 num-traits = "0.2.19"

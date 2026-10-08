@@ -4,7 +4,7 @@ use core::fmt;
 
 use aes_gcm::{
     AesGcm,
-    aead::{AeadInPlace, KeyInit, generic_array::GenericArray},
+    aead::{AeadInOut, KeyInit, Nonce, Tag},
     aes::Aes256,
 };
 use curve25519_dalek::{edwards::CompressedEdwardsY, scalar::Scalar};
@@ -148,16 +148,15 @@ pub fn decrypt_shield_random(
     let cipher = Aes256Gcm16::new_from_slice(shared_key.as_bytes())
         .map_err(|_| ShieldCiphertextError::AuthenticationFailed)?;
     let mut decrypted_random = encrypted_random_and_ctr_iv[..ENCRYPTED_RANDOM_LENGTH].to_vec();
+    let nonce = Nonce::<Aes256Gcm16>::try_from(&iv_tag[..IV_LENGTH])
+        .map_err(|_| ShieldCiphertextError::AuthenticationFailed)?;
+    let tag = Tag::<Aes256Gcm16>::try_from(&iv_tag[IV_LENGTH..IV_LENGTH + TAG_LENGTH])
+        .map_err(|_| ShieldCiphertextError::AuthenticationFailed)?;
 
     // `encryptedBundle[1]` is a mixed field: the first 16 bytes are the encrypted
     // random chunk and the remaining bytes carry the CTR IV for receiver key material.
     cipher
-        .decrypt_in_place_detached(
-            GenericArray::from_slice(&iv_tag[..IV_LENGTH]),
-            b"",
-            &mut decrypted_random,
-            GenericArray::from_slice(&iv_tag[IV_LENGTH..IV_LENGTH + TAG_LENGTH]),
-        )
+        .decrypt_inout_detached(&nonce, b"", decrypted_random.as_mut_slice().into(), &tag)
         .map_err(|_| ShieldCiphertextError::AuthenticationFailed)?;
 
     // Shield-random recovery intentionally ignores the trailing CTR IV bytes in
@@ -171,7 +170,7 @@ pub fn decrypt_shield_random(
 mod tests {
     use aes_gcm::{
         AesGcm,
-        aead::{AeadInPlace, KeyInit, generic_array::GenericArray},
+        aead::{AeadInOut, KeyInit, Nonce},
         aes::Aes256,
     };
 
@@ -195,7 +194,11 @@ mod tests {
         let iv = [0x11_u8; 16];
         let mut encrypted_random = random.as_bytes().to_vec();
         let tag = cipher
-            .encrypt_in_place_detached(GenericArray::from_slice(&iv), b"", &mut encrypted_random)
+            .encrypt_inout_detached(
+                &Nonce::<Aes256Gcm16>::from(iv),
+                b"",
+                encrypted_random.as_mut_slice().into(),
+            )
             .unwrap_or_else(|_| panic!("shield random encryption should succeed"));
 
         let mut iv_tag = Vec::with_capacity(32);
