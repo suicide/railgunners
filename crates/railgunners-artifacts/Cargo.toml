@@ -15,9 +15,9 @@ default = []
 download = ["dep:brotli", "dep:tempfile", "dep:ureq"]
 
 [dependencies]
-brotli = { version = "8.0.2", optional = true }
+brotli = { version = "8.0.4", optional = true }
 serde.workspace = true
-serde_json = "1.0.145"
+serde_json = "1.0.151"
 sha2 = "0.11.0"
 tempfile = { version = "3.23.0", optional = true }
-ureq = { version = "3.3.0", optional = true }
+ureq = { version = "3.4.2", optional = true }

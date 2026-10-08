@@ -15,7 +15,7 @@ name = "railgunners"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.5.48", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
 getrandom = "0.3.4"
 hex = "0.4.3"
 num-bigint.workspace = true
@@ -23,4 +23,4 @@ railgunners-artifacts.workspace = true
 railgunners-core.workspace = true
 railgunners-types.workspace = true
 serde.workspace = true
-serde_json = "1.0.145"
+serde_json = "1.0.151"

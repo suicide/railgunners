@@ -27,8 +27,8 @@ railgunners-prover = { path = "crates/railgunners-prover" }
 railgunners-types = { path = "crates/railgunners-types" }
 railgunners-core = { path = "crates/railgunners-core" }
 bech32 = "0.11.1"
-num-bigint = "0.4.6"
-serde = { version = "1.0.228", features = ["derive"] }
+num-bigint = "0.4.8"
+serde = { version = "1.0.229", features = ["derive"] }
 
 [workspace.lints.rust]
 missing_docs = "warn"
