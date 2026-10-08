@@ -29,6 +29,17 @@ impl Bip39WordCount {
             Self::Words24 => 24,
         }
     }
+
+    /// Maps to the `bip39` crate's word count enum.
+    const fn to_bip39(self) -> bip39::WordCount {
+        match self {
+            Self::Words12 => bip39::WordCount::Words12,
+            Self::Words15 => bip39::WordCount::Words15,
+            Self::Words18 => bip39::WordCount::Words18,
+            Self::Words21 => bip39::WordCount::Words21,
+            Self::Words24 => bip39::WordCount::Words24,
+        }
+    }
 }
 
 impl TryFrom<usize> for Bip39WordCount {
@@ -100,7 +111,7 @@ impl Bip39Mnemonic {
     ///
     /// Returns an error if the requested word count is unsupported by BIP-39.
     pub fn generate(word_count: Bip39WordCount) -> Result<Self, Bip39Error> {
-        let inner = Mnemonic::generate_in(Language::English, word_count.as_usize())?;
+        let inner = Mnemonic::generate_in(Language::English, word_count.to_bip39())?;
         Ok(Self { inner })
     }
 
