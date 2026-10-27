@@ -269,7 +269,7 @@ fn default_transact_type() -> String {
     "COMMON".to_owned()
 }
 
-fn default_version() -> String {
+pub(crate) fn default_version() -> String {
     "0.0.0".to_owned()
 }
 
@@ -313,7 +313,7 @@ struct Groth16ProofWire {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct PreTransactionPoiWire {
+pub(crate) struct PreTransactionPoiWire {
     #[serde(rename = "snarkProof")]
     snark_proof: Groth16ProofWire,
     #[serde(rename = "txidMerkleroot")]
@@ -330,7 +330,7 @@ struct PreTransactionPoiWire {
 // Private validation and parsing helpers
 // ---------------------------------------------------------------------------
 
-fn validate_hex_bytes(value: &str) -> Result<Vec<u8>, BroadcasterError> {
+pub(crate) fn validate_hex_bytes(value: &str) -> Result<Vec<u8>, BroadcasterError> {
     let trimmed = value.strip_prefix("0x").unwrap_or(value);
     hex::decode(trimmed).map_err(|_| BroadcasterError::InvalidTransactCalldata)
 }
@@ -368,7 +368,7 @@ fn decode_hex_with_error(
     hex::decode(trimmed).map_err(|_| error)
 }
 
-fn parse_txid_version(value: &str) -> Result<TxidVersion, BroadcasterError> {
+pub(crate) fn parse_txid_version(value: &str) -> Result<TxidVersion, BroadcasterError> {
     match value {
         "V2_PoseidonMerkle" => Ok(TxidVersion::V2PoseidonMerkle),
         "V3_PoseidonMerkle" => Ok(TxidVersion::V3PoseidonMerkle),
@@ -376,7 +376,7 @@ fn parse_txid_version(value: &str) -> Result<TxidVersion, BroadcasterError> {
     }
 }
 
-fn serialize_txid_version(value: TxidVersion) -> &'static str {
+pub(crate) fn serialize_txid_version(value: TxidVersion) -> &'static str {
     match value {
         TxidVersion::V2PoseidonMerkle => "V2_PoseidonMerkle",
         TxidVersion::V3PoseidonMerkle => "V3_PoseidonMerkle",
@@ -395,18 +395,46 @@ fn parse_chain_type(value: u64) -> Result<ChainType, BroadcasterError> {
 fn parse_shared_params(
     wire: &BroadcasterRawParamsTransactCommonWire,
 ) -> Result<BroadcasterRequestSharedParams, BroadcasterError> {
-    let txid_version = parse_txid_version(&wire.txid_version)?;
-    let chain_id = ChainId::new(wire.chain_id).map_err(|_| BroadcasterError::InvalidChainId)?;
-    let chain_type = parse_chain_type(wire.chain_type)?;
+    parse_shared_params_fields(&SharedWireFields {
+        txid_version: &wire.txid_version,
+        chain_id: wire.chain_id,
+        chain_type: wire.chain_type,
+        fees_id: &wire.fees_id,
+        broadcaster_viewing_key: &wire.broadcaster_viewing_key,
+        dev_log: wire.dev_log,
+        min_version: &wire.min_version,
+        max_version: &wire.max_version,
+    })
+}
+
+/// Shared wire fields carried by both `COMMON` and `TX7702` requests.
+pub(crate) struct SharedWireFields<'a> {
+    pub(crate) txid_version: &'a str,
+    pub(crate) chain_id: u64,
+    pub(crate) chain_type: u64,
+    pub(crate) fees_id: &'a str,
+    pub(crate) broadcaster_viewing_key: &'a str,
+    pub(crate) dev_log: bool,
+    pub(crate) min_version: &'a str,
+    pub(crate) max_version: &'a str,
+}
+
+/// Parses the shared request fields carried by both `COMMON` and `TX7702`.
+pub(crate) fn parse_shared_params_fields(
+    fields: &SharedWireFields<'_>,
+) -> Result<BroadcasterRequestSharedParams, BroadcasterError> {
+    let txid_version = parse_txid_version(fields.txid_version)?;
+    let chain_id = ChainId::new(fields.chain_id).map_err(|_| BroadcasterError::InvalidChainId)?;
+    let chain_type = parse_chain_type(fields.chain_type)?;
 
     BroadcasterRequestSharedParams::new(
         txid_version,
         chain_id,
         chain_type,
-        wire.fees_id.clone(),
-        wire.broadcaster_viewing_key.clone(),
-        wire.dev_log,
-        BroadcasterVersionRange::new(wire.min_version.clone(), wire.max_version.clone())?,
+        fields.fees_id.to_owned(),
+        fields.broadcaster_viewing_key.to_owned(),
+        fields.dev_log,
+        BroadcasterVersionRange::new(fields.min_version.to_owned(), fields.max_version.to_owned())?,
     )
 }
 
@@ -478,7 +506,7 @@ fn parse_pre_transaction_poi(
     })
 }
 
-fn parse_pre_transaction_poi_bundle(
+pub(crate) fn parse_pre_transaction_poi_bundle(
     wire: BTreeMap<String, BTreeMap<String, PreTransactionPoiWire>>,
 ) -> Result<PreTransactionPoisPerTxidLeafPerList, BroadcasterError> {
     let mut proofs = HashMap::new();
@@ -548,7 +576,7 @@ fn encode_pre_transaction_poi(proof: &PreTransactionPoi) -> PreTransactionPoiWir
     }
 }
 
-fn encode_pre_transaction_poi_bundle(
+pub(crate) fn encode_pre_transaction_poi_bundle(
     bundle: &PreTransactionPoisPerTxidLeafPerList,
 ) -> BTreeMap<String, BTreeMap<String, PreTransactionPoiWire>> {
     let mut outer = BTreeMap::new();
@@ -568,7 +596,12 @@ impl TryFrom<BroadcasterRawParamsTransactCommonWire> for BroadcasterRawParamsTra
     type Error = BroadcasterError;
 
     fn try_from(value: BroadcasterRawParamsTransactCommonWire) -> Result<Self, Self::Error> {
-        BroadcasterTransactRequestType::parse(&value.transact_type)?;
+        match BroadcasterTransactRequestType::parse(&value.transact_type)? {
+            BroadcasterTransactRequestType::Common => {}
+            BroadcasterTransactRequestType::Tx7702 => {
+                return Err(BroadcasterError::UnsupportedTransactType(value.transact_type));
+            }
+        }
         let shared = parse_shared_params(&value)?;
         let pre_transaction_pois_per_txid_leaf_per_list =
             parse_pre_transaction_poi_bundle(value.pre_transaction_pois_per_txid_leaf_per_list)?;
@@ -1107,12 +1140,12 @@ mod tests {
                 .unwrap_or_else(|error| panic!("payload should serialize: {error}")),
         )
         .unwrap_or_else(|error| panic!("payload should parse: {error}"));
-        value["transactType"] = serde_json::Value::String("TX7702".to_owned());
+        value["transactType"] = serde_json::Value::String("UNSUPPORTED".to_owned());
 
         let Err(error) = parse(&value.to_string()) else {
             panic!("unsupported transact type should fail");
         };
-        assert_eq!(error, BroadcasterError::UnsupportedTransactType("TX7702".to_owned()));
+        assert_eq!(error, BroadcasterError::UnsupportedTransactType("UNSUPPORTED".to_owned()));
     }
 
     #[test]
