@@ -1,6 +1,6 @@
 //! Pure decoders for supported RAILGUN transaction calldata.
 //!
-//! This module understands the exact ABI shape of three supported contract
+//! This module understands the exact ABI shape of the supported contract
 //! entrypoints and projects their output material onto the existing SDK
 //! transaction types so callers can classify payments without duplicating ABI
 //! or cryptography:
@@ -9,6 +9,10 @@
 //!   (`0xd8ae136a`)
 //! - V2 `RelayAdapt.relay` (`0x28223a77`)
 //! - V3 `PoseidonMerkleVerifier.execute` (`0x3474c6fe`)
+//! - `RelayAdapt7702.execute`, current four-argument and legacy three-argument
+//!   forms. The argument shape is pinned by the engine 9.9.1 `RelayAdapt7702`
+//!   ABI; `multicall` is not a RAILGUN transaction entrypoint and stays
+//!   unsupported.
 //!
 //! # Output projections
 //!
@@ -33,7 +37,7 @@
 
 use core::fmt;
 
-use alloy_sol_types::SolCall;
+use alloy_sol_types::{SolCall, SolValue};
 use num_bigint::BigUint;
 use railgunners_types::{
     DecodedCommitmentCiphertextV2, DecodedCommitmentCiphertextV3, NoteCommitment, TxidVersion,
@@ -50,6 +54,8 @@ pub enum CallKind {
     V2Relay,
     /// V3 `execute(Transaction[], ShieldRequest[], GlobalBoundParams, ShieldCiphertext)`.
     V3Execute,
+    /// `RelayAdapt7702.execute` over V2 transactions, current or legacy form.
+    RelayAdapt7702Execute,
 }
 
 /// Error returned when transaction-call decoding fails.
@@ -60,8 +66,8 @@ pub enum Error {
         /// Number of bytes supplied.
         length: usize,
     },
-    /// The selector does not match any supported call, including 7702-style
-    /// `execute` and `multicall` entrypoints.
+    /// The selector does not match any supported call, including 7702
+    /// `multicall` entrypoints.
     UnsupportedSelector {
         /// The unsupported selector bytes.
         selector: [u8; 4],
@@ -133,9 +139,9 @@ impl Call {
 /// Decodes supported RAILGUN transaction calldata into ordered output projections.
 ///
 /// Supported selectors are V2 `transact` (`0xd8ae136a`), V2 `relay`
-/// (`0x28223a77`), and V3 `execute` (`0x3474c6fe`). The function match is exact;
-/// unknown selectors, including 7702-style `execute` and `multicall` forms, are
-/// rejected.
+/// (`0x28223a77`), V3 `execute` (`0x3474c6fe`), and `RelayAdapt7702.execute` in
+/// its current four-argument and legacy three-argument forms. The function
+/// match is exact; unknown selectors, including 7702 `multicall`, are rejected.
 ///
 /// The full ABI payload is decoded and re-encoded for byte-identical equality
 /// before projection. Commitment hashes and commitment ciphertext entries keep
@@ -184,6 +190,24 @@ pub fn decode(input: &[u8]) -> Result<Call, Error> {
         return Ok(Call { kind: CallKind::V3Execute, transactions });
     }
 
+    if selector == abi_7702::execute_0Call::SELECTOR {
+        let call = abi_7702::execute_0Call::abi_decode_raw_validate(arguments)
+            .map_err(|_| Error::MalformedAbi)?;
+        validate_reencoding(&call, arguments)?;
+        let transactions = project_v2_7702(&call._transactions)?;
+
+        return Ok(Call { kind: CallKind::RelayAdapt7702Execute, transactions });
+    }
+
+    if selector == abi_7702::execute_1Call::SELECTOR {
+        let call = abi_7702::execute_1Call::abi_decode_raw_validate(arguments)
+            .map_err(|_| Error::MalformedAbi)?;
+        validate_reencoding(&call, arguments)?;
+        let transactions = project_v2_7702(&call._transactions)?;
+
+        return Ok(Call { kind: CallKind::RelayAdapt7702Execute, transactions });
+    }
+
     Err(Error::UnsupportedSelector { selector })
 }
 
@@ -203,6 +227,22 @@ fn commitment_from_bytes(
 ) -> Result<NoteCommitment, Error> {
     NoteCommitment::new(BigUint::from_bytes_be(bytes))
         .map_err(|_| Error::InvalidCommitment { transaction_index, commitment_index })
+}
+
+/// Projects the 7702 `Transaction[]` field, whose tuple shape is identical to
+/// the V2 transaction struct.
+fn project_v2_7702(
+    transactions: &[abi_7702::TransactionV2],
+) -> Result<Vec<VersionedTransaction>, Error> {
+    let transactions = transactions
+        .iter()
+        .map(|transaction| {
+            abi::TransactionV2::abi_decode_params_validate(&transaction.abi_encode_params())
+                .map_err(|_| Error::MalformedAbi)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    project_v2(&transactions)
 }
 
 fn project_v2(transactions: &[abi::TransactionV2]) -> Result<Vec<VersionedTransaction>, Error> {
@@ -422,6 +462,99 @@ mod abi {
     }
 }
 
+/// Pinned `RelayAdapt7702` ABI, current and legacy `execute` forms.
+///
+/// The two forms are declared as overloads so both keep the on-chain
+/// `execute` selector while exposing distinct call types. The current form is
+/// declared first and therefore generates `execute_0Call`. The `Transaction`
+/// struct is the V2 RAILGUN transaction shape, redeclared here because
+/// `sol!` resolves structs within its own invocation.
+mod abi_7702 {
+    use alloy_sol_types::sol;
+
+    sol! {
+        struct G1Point {
+            uint256 x;
+            uint256 y;
+        }
+
+        struct G2Point {
+            uint256[2] x;
+            uint256[2] y;
+        }
+
+        struct Proof {
+            G1Point a;
+            G2Point b;
+            G1Point c;
+        }
+
+        struct TokenData {
+            uint8 tokenType;
+            address tokenAddress;
+            uint256 tokenSubID;
+        }
+
+        struct UnshieldPreimage {
+            bytes32 npk;
+            TokenData token;
+            uint120 value;
+        }
+
+        struct CommitmentCiphertextV2 {
+            bytes32[4] ciphertext;
+            bytes32 blindedSenderViewingKey;
+            bytes32 blindedReceiverViewingKey;
+            bytes annotationData;
+            bytes memo;
+        }
+
+        struct BoundParamsV2 {
+            uint16 treeNumber;
+            uint72 minGasPrice;
+            uint8 unshield;
+            uint64 chainID;
+            address adaptContract;
+            bytes32 adaptParams;
+            CommitmentCiphertextV2[] commitmentCiphertext;
+        }
+
+        struct TransactionV2 {
+            Proof proof;
+            bytes32 merkleRoot;
+            bytes32[] nullifiers;
+            bytes32[] commitments;
+            BoundParamsV2 boundParams;
+            UnshieldPreimage unshieldPreimage;
+        }
+
+        struct ActionCall {
+            address to;
+            bytes data;
+            uint256 value;
+        }
+
+        struct ActionData {
+            bool requireSuccess;
+            uint256 minGasLimit;
+            ActionCall[] calls;
+        }
+
+        function execute(
+            TransactionV2[] _transactions,
+            ActionData _actionData,
+            uint256 _nonce,
+            bytes _signature
+        ) external payable;
+
+        function execute(
+            TransactionV2[] _transactions,
+            ActionData _actionData,
+            bytes _signature
+        ) external payable;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_sol_types::SolCall;
@@ -432,7 +565,7 @@ mod tests {
         ViewingPublicKey,
     };
 
-    use super::{CallKind, Error, SELECTOR_LENGTH, abi, decode};
+    use super::{CallKind, Error, SELECTOR_LENGTH, abi, abi_7702, decode};
     use crate::{
         NoteReconstructionError, TransactionCommitmentError, V2CiphertextError, V3CiphertextError,
         decrypt_v2_ciphertext, decrypt_v3_ciphertext, derive_shared_symmetric_key,
@@ -451,6 +584,8 @@ mod tests {
         v2_missing_output: Case,
         v2_invalid_commitment: Case,
         v3_accepted: V3Case,
+        relay_adapt7702_current: Case,
+        relay_adapt7702_legacy: Case,
     }
 
     #[derive(serde::Deserialize)]
@@ -459,6 +594,8 @@ mod tests {
         v2_transact: String,
         v2_relay: String,
         v3_execute: String,
+        relay_adapt7702_current: String,
+        relay_adapt7702_legacy: String,
     }
 
     #[derive(serde::Deserialize)]
@@ -561,10 +698,40 @@ mod tests {
         assert_eq!(fixtures.selectors.v2_transact, "0xd8ae136a");
         assert_eq!(fixtures.selectors.v2_relay, "0x28223a77");
         assert_eq!(fixtures.selectors.v3_execute, "0x3474c6fe");
+        assert_eq!(fixtures.selectors.relay_adapt7702_current, "0x3e12cc2e");
+        assert_eq!(fixtures.selectors.relay_adapt7702_legacy, "0xc61e6b9d");
 
         assert_eq!(hex_encode(&abi::transactCall::SELECTOR), "d8ae136a");
         assert_eq!(hex_encode(&abi::relayCall::SELECTOR), "28223a77");
         assert_eq!(hex_encode(&abi::executeCall::SELECTOR), "3474c6fe");
+        assert_eq!(hex_encode(&abi_7702::execute_0Call::SELECTOR), "3e12cc2e");
+        assert_eq!(hex_encode(&abi_7702::execute_1Call::SELECTOR), "c61e6b9d");
+    }
+
+    #[test]
+    fn decodes_relay_adapt_7702_current_and_legacy_fixtures() {
+        let fixtures = fixtures();
+
+        for case in [&fixtures.relay_adapt7702_current, &fixtures.relay_adapt7702_legacy] {
+            let call = decode(&hex_bytes(&case.calldata))
+                .unwrap_or_else(|error| panic!("7702 execute fixture should decode: {error}"));
+
+            assert_eq!(call.kind(), CallKind::RelayAdapt7702Execute);
+            assert_eq!(call.transactions().len(), 1);
+
+            let VersionedTransaction::V2(transaction) = &call.transactions()[0] else {
+                panic!("7702 execute fixture should project a v2 transaction");
+            };
+            assert_eq!(
+                transaction.commitments(),
+                &[commitment(
+                    case.commitment
+                        .as_deref()
+                        .unwrap_or_else(|| panic!("7702 fixture should carry a commitment"))
+                )]
+            );
+            assert_eq!(transaction.bound_params().commitment_ciphertext().len(), 1);
+        }
     }
 
     #[test]
@@ -691,16 +858,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_7702_execute_and_multicall_selectors() {
-        // RAILGUN RelayAdapt7702 execute variants and multicall, followed by
-        // adjacent account entrypoints, must never match the V3 execute selector.
+    fn rejects_7702_multicall_and_unknown_selectors() {
+        // RAILGUN RelayAdapt7702 multicall and adjacent entrypoints must never
+        // match a supported execute selector.
         for selector in [
-            [0xdb, 0x43, 0xcb, 0x8f],
-            [0x19, 0xac, 0x07, 0x55],
             [0x7a, 0x0d, 0xc2, 0xa5],
-            [0xe9, 0xae, 0x5c, 0x53],
-            [0x24, 0x85, 0x6b, 0xc3],
             [0xac, 0x96, 0x50, 0xd8],
+            [0x24, 0x85, 0x6b, 0xc3],
+            [0xe9, 0xae, 0x5c, 0x53],
         ] {
             let mut input = selector.to_vec();
             input.extend_from_slice(&[0_u8; 64]);

@@ -32,8 +32,8 @@ Current note-modeling behavior includes sender-visibility rules used during note
 
 Transaction-call decoding is available from `railgunners_core::transaction_call`:
 
-- `decode(&[u8])` matches the exact V2 `transact` (`0xd8ae136a`), V2 `relay` (`0x28223a77`), and V3 `execute` (`0x3474c6fe`) selectors and returns ordered `VersionedTransaction` output projections.
-- Decoding is strict ABI decoding: the full payload is validated and re-encoded byte-for-byte, so trailing bytes, non-canonical offsets, and non-zero padding are rejected along with unknown selectors, including 7702-style `execute` and `multicall`.
+- `decode(&[u8])` matches the exact V2 `transact` (`0xd8ae136a`), V2 `relay` (`0x28223a77`), V3 `execute` (`0x3474c6fe`), and `RelayAdapt7702.execute` current (`0x3e12cc2e`) and legacy (`0xc61e6b9d`) selectors and returns ordered `VersionedTransaction` output projections.
+- Decoding is strict ABI decoding: the full payload is validated and re-encoded byte-for-byte, so trailing bytes, non-canonical offsets, and non-zero padding are rejected along with unknown selectors, including 7702 `multicall`.
 - It is deliberately not a lossless call serializer: relay actions, V3 shield requests, global bound params, and proofs are not exposed, and no proof, destination-authorization, fee, or decryption policy is applied.
 - Empty commitment lists, empty ciphertext lists, and mismatched counts are preserved so consumers can classify missing payment material themselves.
 
