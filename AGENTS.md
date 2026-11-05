@@ -1,70 +1,29 @@
 # AGENTS.md
 
-## Project overview
+`railgunners` is the RAILGUN Rust SDK: protocol libraries, thin WASM bindings, and a thin CLI. If this file conflicts with `ARCHITECTURE_CONSTITUTION.md`, the constitution wins. Surface the conflict; do not bypass it.
 
-`railgunners` is a modular Rust SDK for the RAILGUN privacy system. It provides shared protocol libraries, thin WASM bindings, and a small CLI built on the same public APIs. The main technologies are Rust, Cargo, and Nix.
+## Verify
 
-If this file conflicts with `ARCHITECTURE_CONSTITUTION.md`, the constitution wins.
+- Enter the dev shell with `nix develop`. Commands and CI coverage are in `README.md` under Development.
+- Use crate-scoped commands while iterating, and workspace-wide commands when the change is shared.
+- A change is not done until the smallest relevant crate checks pass. Use `nix flake check` before finishing broad or cross-cutting work.
 
-## How to run and build
+## Hard rules
 
-- Recommended environment: `nix develop`
-- Fetch dependencies: `cargo fetch`
-- Check the workspace: `cargo check`
-- Build the workspace: `cargo build`
-- Build the CLI package: `cargo build -p railgunners-cli`
-- Run the CLI locally: `cargo run -p railgunners-cli -- --help`
-- Build with pinned Nix config: `nix build .#default`
+- Preserve layering: `core/domain -> adapters -> bindings/apps`. Keep vendor-specific integrations out of core crates.
+- Keep `railgunners-wasm` and `railgunners-cli` thin. New CLI behavior goes into public library APIs first.
+- Prefer typed domain models and fallible validation at boundaries. Do not expose secrets or privacy-sensitive material through convenience APIs.
+- Prefer `core` over `std` in reusable core code where practical. Avoid new crates or heavy dependencies unless a real boundary justifies them.
+- Prefer module-scoped names over long flat names. See `CONTRIBUTING.md`.
+- No branch or commit-message convention is documented. Do not invent one.
 
-## Testing and verification
+## Docs
 
-- Format: `cargo fmt --all --check`
-- Lint: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- Dependency policy: `cargo deny check`
-- Tests: `cargo test --workspace`
-- Broad final verification: `nix flake check`
+- `ARCHITECTURE_CONSTITUTION.md` — binding rules
+- `ARCHITECTURE.md` — layering and crate responsibilities
+- `CONTRIBUTING.md` — contribution flow and agent rules
+- `VISION.md` — goals and non-goals
+- `README.md` — workspace status, crate list, and CLI usage
+- `docs/` — topic notes
 
-Changes are not complete until the smallest relevant crate-level checks pass. Run workspace-level checks for shared changes. Prefer `nix flake check` before finishing broad or cross-cutting work.
-
-## Project structure
-
-- `crates/railgunners-types/` - shared domain types and validated primitives
-- `crates/railgunners-core/` - shared protocol traits, errors, crypto, and core logic
-- `crates/railgunners-artifacts/` - proving-artifact metadata and optional downloads
-- `crates/railgunners-broadcaster/` - typed broadcaster models and helpers
-- `crates/railgunners-poi/` - typed Proof of Innocence models, validation, and optional transports
-- `crates/railgunners-prover/` - proving abstractions and helpers
-- `crates/railgunners-wasm/` - thin WASM bindings over Rust logic
-- `crates/railgunners-cli/` - thin operational CLI using public library APIs
-
-## Code and git workflow
-
-- Read first: `ARCHITECTURE_CONSTITUTION.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `VISION.md`, `README.md`
-- Make the smallest change that fits the correct architectural layer.
-- Use crate-scoped commands while iterating; use workspace-wide commands when the change is shared.
-- Keep docs in sync when commands, workflow, architecture, or crate boundaries change.
-- Follow repo tooling rather than local style preferences: `rustfmt`, workspace `clippy` lints, and `cargo deny`.
-- No branch naming or commit message convention is documented here; do not invent one.
-
-## Constraints and boundaries
-
-- Must preserve layering: `core/domain -> adapters -> bindings/apps`.
-- Must keep vendor-specific integrations out of core crates.
-- Must keep `railgunners-wasm` thin; do not move protocol logic into bindings.
-- Must keep `railgunners-cli` thin; if the CLI needs new behavior, add it to public library APIs first.
-- Must prefer typed domain models over raw strings, bytes, or maps for protocol concepts.
-- Must use fallible validation at boundaries when invalid input is possible.
-- Must keep defaults optional; do not hard-wire one external stack.
-- Must avoid exposing secrets or privacy-sensitive material through unsafe convenience APIs.
-- Should prefer `core` over `std` in reusable/core code where practical.
-- Should avoid new crates or heavy dependencies unless a real boundary justifies them.
-- Should use module-scoped naming: when adding new functionality, prefer creating a module to scope related items rather than adding long flat names. Prefer `payments::invoice::send(…)` to `send_payments_invoice(…)`.
-- Never bypass the architecture constitution to satisfy a task; surface the conflict instead.
-
-## Links to deeper docs
-
-- `ARCHITECTURE_CONSTITUTION.md` - binding architectural rules
-- `ARCHITECTURE.md` - workspace layering and crate responsibilities
-- `CONTRIBUTING.md` - contribution flow and dependency guidance
-- `VISION.md` - goals and non-goals
-- `README.md` - current workspace status and CLI usage
+Do not grow this file with command catalogs or implementation notes. Update the owning doc instead.
