@@ -9,6 +9,7 @@ Before making changes, read `ARCHITECTURE_CONSTITUTION.md` and `ARCHITECTURE.md`
 ## Working Principles
 
 - preserve modularity
+- prefer `core` over `std` in reusable core code where practical
 - prefer typed domain models over stringly shortcuts
 - keep vendor-specific code at the edges
 - treat WASM and CLI as first-class consumers of library APIs
@@ -135,7 +136,9 @@ At minimum, contributors should keep aligned:
 - `VISION.md`
 - `CONTRIBUTING.md`
 
-If code changes require new conventions, document them close to the affected crate as well.
+`AGENTS.md` is the session entrypoint: identity, how to verify, hard operating rules, and pointers. Update it only when an entrypoint or a hard rule changes. Do not copy command catalogs or implementation notes into it.
+
+Topic notes live in `docs/`. If code changes require new conventions, document them close to the affected crate as well.
 
 ## Scope Discipline
 
