@@ -1,4 +1,11 @@
 //! Optional broadcaster-facing models and validation helpers.
+//!
+//! Fee quotes treat the classic `relayAdapt` address as optional. A chain with
+//! no classic relay-adapt deployment omits the key instead of sending `null`,
+//! an empty string, or the zero address, and consumers fall back to
+//! `relayAdapt7702`. A missing key is the canonical "no classic relay" signal;
+//! an empty string is rejected, while the all-zero address is still accepted
+//! because some broadcasters publish it as a legacy sentinel.
 
 mod error;
 mod fee;

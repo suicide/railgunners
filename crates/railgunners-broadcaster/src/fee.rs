@@ -28,8 +28,8 @@ struct BroadcasterFeeMessageDataWire {
     #[serde(rename = "availableWallets")]
     available_wallets: u64,
     version: String,
-    #[serde(rename = "relayAdapt")]
-    relay_adapt: String,
+    #[serde(rename = "relayAdapt", skip_serializing_if = "Option::is_none")]
+    relay_adapt: Option<String>,
     #[serde(rename = "relayAdapt7702", skip_serializing_if = "Option::is_none")]
     relay_adapt_7702: Option<String>,
     #[serde(rename = "requiredPOIListKeys")]
@@ -47,7 +47,7 @@ pub struct BroadcasterFeeMessageData {
     identifier: Option<String>,
     available_wallets: u64,
     version: String,
-    relay_adapt: Address,
+    relay_adapt: Option<Address>,
     relay_adapt_7702: Option<Address>,
     required_poi_list_keys: Vec<PoiListKey>,
     reliability: f64,
@@ -70,8 +70,14 @@ pub struct BroadcasterFeeMessageDataFields {
     pub available_wallets: u64,
     /// Broadcaster version string.
     pub version: String,
-    /// Relay-adapt contract address.
-    pub relay_adapt: Address,
+    /// Optional classic relay-adapt contract address.
+    ///
+    /// `None` means the chain has no classic `RelayAdapt` deployment. When
+    /// unset, the key is omitted from the serialized quote rather than sent as
+    /// `null` or an empty string, and clients fall back to
+    /// [`Self::relay_adapt_7702`]. The all-zero address is still accepted when
+    /// parsing legacy quotes that publish it as a sentinel.
+    pub relay_adapt: Option<Address>,
     /// Optional EIP-7702 relay-adapt contract address.
     pub relay_adapt_7702: Option<Address>,
     /// Required POI list keys.
@@ -150,10 +156,13 @@ impl BroadcasterFeeMessageData {
         &self.version
     }
 
-    /// Returns the relay-adapt contract address.
+    /// Returns the classic relay-adapt contract address when one exists.
+    ///
+    /// A quote for a chain without a classic `RelayAdapt` omits the field
+    /// entirely; consumers should then use [`Self::relay_adapt_7702`].
     #[must_use]
-    pub const fn relay_adapt(&self) -> &Address {
-        &self.relay_adapt
+    pub const fn relay_adapt(&self) -> Option<&Address> {
+        self.relay_adapt.as_ref()
     }
 
     /// Returns the optional EIP-7702 relay-adapt contract address.
@@ -229,15 +238,20 @@ fn validate_fee_message_data_fields(
     Ok(())
 }
 
-fn parse_relay_adapt(value: &str) -> Result<Address, BroadcasterError> {
-    if value.is_empty() {
-        return Err(BroadcasterError::InvalidFeeMessageField(
-            "relayAdapt must not be empty".into(),
-        ));
-    }
+fn parse_relay_adapt(value: Option<String>) -> Result<Option<Address>, BroadcasterError> {
+    value
+        .map(|relay_adapt| {
+            if relay_adapt.is_empty() {
+                return Err(BroadcasterError::InvalidFeeMessageField(
+                    "relayAdapt must not be empty".into(),
+                ));
+            }
 
-    Address::parse(value)
-        .map_err(|_| BroadcasterError::InvalidFeeMessageField("relayAdapt is invalid".into()))
+            Address::parse(&relay_adapt).map_err(|_| {
+                BroadcasterError::InvalidFeeMessageField("relayAdapt is invalid".into())
+            })
+        })
+        .transpose()
 }
 
 fn parse_relay_adapt_7702(value: Option<String>) -> Result<Option<Address>, BroadcasterError> {
@@ -263,7 +277,7 @@ impl TryFrom<BroadcasterFeeMessageDataWire> for BroadcasterFeeMessageData {
         let railgun_address = RailgunAddress::parse(&value.railgun_address).map_err(|_| {
             BroadcasterError::InvalidFeeMessageField("railgunAddress is invalid".into())
         })?;
-        let relay_adapt = parse_relay_adapt(&value.relay_adapt)?;
+        let relay_adapt = parse_relay_adapt(value.relay_adapt)?;
         let relay_adapt_7702 = parse_relay_adapt_7702(value.relay_adapt_7702)?;
         validate_fee_message_data_fields(&value.fees_id, &railgun_address, &value.version)?;
         let required_poi_list_keys = value
@@ -304,7 +318,7 @@ impl From<&BroadcasterFeeMessageData> for BroadcasterFeeMessageDataWire {
             identifier: value.identifier().map(ToOwned::to_owned),
             available_wallets: value.available_wallets(),
             version: value.version().to_owned(),
-            relay_adapt: value.relay_adapt().to_string(),
+            relay_adapt: value.relay_adapt().map(ToString::to_string),
             relay_adapt_7702: value.relay_adapt_7702().map(ToString::to_string),
             required_poi_list_keys: value
                 .required_poi_list_keys()
@@ -502,8 +516,10 @@ mod tests {
             identifier: Some("test-broadcaster".to_owned()),
             available_wallets: 4,
             version: "0.1.0".to_owned(),
-            relay_adapt: Address::parse("0xac9f360ae85469b27aeddeafc579ef2d052ad405")
-                .unwrap_or_else(|error| panic!("test relayAdapt should parse: {error}")),
+            relay_adapt: Some(
+                Address::parse("0xac9f360ae85469b27aeddeafc579ef2d052ad405")
+                    .unwrap_or_else(|error| panic!("test relayAdapt should parse: {error}")),
+            ),
             relay_adapt_7702: Some(
                 Address::parse("0x1111111111111111111111111111111111111111")
                     .unwrap_or_else(|error| panic!("test relayAdapt7702 should parse: {error}")),
@@ -535,6 +551,26 @@ mod tests {
         .to_string()
     }
 
+    fn fee_message_data_with_relay_adapt(
+        relay_adapt: Option<Address>,
+    ) -> BroadcasterFeeMessageData {
+        let sample = sample_fee_message_data();
+        BroadcasterFeeMessageData::new(BroadcasterFeeMessageDataFields {
+            fees: sample.fees().clone(),
+            fee_expiration: sample.fee_expiration(),
+            fees_id: sample.fees_id().to_owned(),
+            railgun_address: sample.railgun_address().clone(),
+            identifier: sample.identifier().map(ToOwned::to_owned),
+            available_wallets: sample.available_wallets(),
+            version: sample.version().to_owned(),
+            relay_adapt,
+            relay_adapt_7702: sample.relay_adapt_7702().copied(),
+            required_poi_list_keys: sample.required_poi_list_keys().to_vec(),
+            reliability: sample.reliability(),
+        })
+        .unwrap_or_else(|error| panic!("test fee data should construct: {error}"))
+    }
+
     #[test]
     fn parses_fee_message_payload_and_preserves_fields() {
         let payload = sample_fee_message_json();
@@ -548,8 +584,8 @@ mod tests {
         assert_eq!(message.data().available_wallets(), 4);
         assert_eq!(message.data().version(), "0.1.0");
         assert_eq!(
-            message.data().relay_adapt().to_string(),
-            "0xAc9f360Ae85469B27aEDdEaFC579Ef2d052aD405"
+            message.data().relay_adapt().map(ToString::to_string),
+            Some("0xAc9f360Ae85469B27aEDdEaFC579Ef2d052aD405".to_owned())
         );
         assert_eq!(
             message.data().relay_adapt_7702().map(ToString::to_string),
@@ -610,7 +646,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("data bytes should be utf8: {error}")),
         )
         .unwrap_or_else(|error| panic!("data json should parse: {error}"));
-        data.relay_adapt = "0xac9f360ae85469b27aeddeafc579ef2d052ad405".to_owned();
+        data.relay_adapt = Some("0xac9f360ae85469b27aeddeafc579ef2d052ad405".to_owned());
         data.relay_adapt_7702 = Some("0x1111111111111111111111111111111111111111".to_owned());
 
         let encoded_data = format!(
@@ -623,7 +659,10 @@ mod tests {
         let parsed = parse_fee_message_data(&encoded_data)
             .unwrap_or_else(|error| panic!("mutated data should parse: {error}"));
 
-        assert_eq!(parsed.relay_adapt().to_string(), "0xAc9f360Ae85469B27aEDdEaFC579Ef2d052aD405");
+        assert_eq!(
+            parsed.relay_adapt().map(ToString::to_string),
+            Some("0xAc9f360Ae85469B27aEDdEaFC579Ef2d052aD405".to_owned())
+        );
         assert_eq!(
             parsed.relay_adapt_7702().map(ToString::to_string),
             Some("0x1111111111111111111111111111111111111111".to_owned())
@@ -675,6 +714,125 @@ mod tests {
         assert_eq!(
             error,
             BroadcasterError::InvalidFeeMessageField("relayAdapt7702 is invalid".into())
+        );
+    }
+
+    #[test]
+    fn omits_relay_adapt_when_unset_during_serialization() {
+        let data = fee_message_data_with_relay_adapt(None);
+        let encoded_data = serialize_fee_message_data(&data)
+            .unwrap_or_else(|error| panic!("fee data should serialize: {error}"));
+        let decoded_data = String::from_utf8(
+            decode_hex(&encoded_data)
+                .unwrap_or_else(|error| panic!("data hex should decode: {error}")),
+        )
+        .unwrap_or_else(|error| panic!("decoded data should be utf8: {error}"));
+        let value: serde_json::Value = serde_json::from_str(&decoded_data)
+            .unwrap_or_else(|error| panic!("decoded data should be valid json: {error}"));
+
+        assert!(
+            value.get("relayAdapt").is_none(),
+            "a chain without a classic relay adapt must omit relayAdapt, not serialize it as null"
+        );
+        assert_eq!(value["relayAdapt7702"], "0x1111111111111111111111111111111111111111");
+    }
+
+    #[test]
+    fn parses_fee_message_without_relay_adapt() {
+        let payload: serde_json::Value = serde_json::from_str(&sample_fee_message_json())
+            .unwrap_or_else(|error| panic!("payload should parse: {error}"));
+        let encoded_data =
+            payload["data"].as_str().unwrap_or_else(|| panic!("data should be a string"));
+        let mut data: serde_json::Value = serde_json::from_slice(
+            &decode_hex(encoded_data)
+                .unwrap_or_else(|error| panic!("data hex should decode: {error}")),
+        )
+        .unwrap_or_else(|error| panic!("data json should parse: {error}"));
+        data.as_object_mut()
+            .unwrap_or_else(|| panic!("data should be a json object"))
+            .remove("relayAdapt");
+
+        let parsed = parse_fee_message_data(&format!(
+            "0x{}",
+            hex::encode(
+                serde_json::to_string(&data)
+                    .unwrap_or_else(|error| panic!("mutated data should serialize: {error}"))
+            )
+        ))
+        .unwrap_or_else(|error| panic!("data without relayAdapt should parse: {error}"));
+
+        assert_eq!(parsed.relay_adapt(), None);
+        assert_eq!(
+            parsed.relay_adapt_7702().map(ToString::to_string),
+            Some("0x1111111111111111111111111111111111111111".to_owned())
+        );
+    }
+
+    #[test]
+    fn rejects_empty_relay_adapt() {
+        let mut data: BroadcasterFeeMessageDataWire = serde_json::from_str(
+            &String::from_utf8(
+                decode_hex(
+                    serde_json::from_str::<serde_json::Value>(&sample_fee_message_json())
+                        .unwrap_or_else(|error| panic!("payload should parse: {error}"))["data"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("data should be a string")),
+                )
+                .unwrap_or_else(|error| panic!("data hex should decode: {error}")),
+            )
+            .unwrap_or_else(|error| panic!("data bytes should be utf8: {error}")),
+        )
+        .unwrap_or_else(|error| panic!("data json should parse: {error}"));
+        data.relay_adapt = Some(String::new());
+
+        let encoded_data = format!(
+            "0x{}",
+            hex::encode(
+                serde_json::to_string(&data)
+                    .unwrap_or_else(|error| panic!("mutated data should serialize: {error}"))
+            )
+        );
+        let Err(error) = parse_fee_message_data(&encoded_data) else {
+            panic!("empty relayAdapt should fail");
+        };
+
+        assert_eq!(
+            error,
+            BroadcasterError::InvalidFeeMessageField("relayAdapt must not be empty".into())
+        );
+    }
+
+    #[test]
+    fn accepts_zero_address_relay_adapt_sentinel() {
+        let mut data: BroadcasterFeeMessageDataWire = serde_json::from_str(
+            &String::from_utf8(
+                decode_hex(
+                    serde_json::from_str::<serde_json::Value>(&sample_fee_message_json())
+                        .unwrap_or_else(|error| panic!("payload should parse: {error}"))["data"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("data should be a string")),
+                )
+                .unwrap_or_else(|error| panic!("data hex should decode: {error}")),
+            )
+            .unwrap_or_else(|error| panic!("data bytes should be utf8: {error}")),
+        )
+        .unwrap_or_else(|error| panic!("data json should parse: {error}"));
+        data.relay_adapt = Some("0x0000000000000000000000000000000000000000".to_owned());
+
+        let encoded_data = format!(
+            "0x{}",
+            hex::encode(
+                serde_json::to_string(&data)
+                    .unwrap_or_else(|error| panic!("mutated data should serialize: {error}"))
+            )
+        );
+        let parsed = parse_fee_message_data(&encoded_data).unwrap_or_else(|error| {
+            panic!("zero sentinel should parse for compatibility: {error}")
+        });
+
+        assert_eq!(
+            parsed.relay_adapt().map(ToString::to_string),
+            Some("0x0000000000000000000000000000000000000000".to_owned())
         );
     }
 
@@ -812,7 +970,7 @@ mod tests {
             identifier: None,
             available_wallets: sample.available_wallets(),
             version: sample.version().to_owned(),
-            relay_adapt: *sample.relay_adapt(),
+            relay_adapt: sample.relay_adapt().copied(),
             relay_adapt_7702: sample.relay_adapt_7702().copied(),
             required_poi_list_keys: sample.required_poi_list_keys().to_vec(),
             reliability: sample.reliability(),
@@ -903,7 +1061,7 @@ mod tests {
             identifier: data.identifier().map(ToOwned::to_owned),
             available_wallets: data.available_wallets(),
             version: data.version().to_owned(),
-            relay_adapt: *data.relay_adapt(),
+            relay_adapt: data.relay_adapt().copied(),
             relay_adapt_7702: data.relay_adapt_7702().copied(),
             required_poi_list_keys: data.required_poi_list_keys().to_vec(),
             reliability: data.reliability(),
