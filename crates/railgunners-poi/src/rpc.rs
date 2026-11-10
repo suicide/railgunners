@@ -1096,6 +1096,16 @@ fn encode_bytes_hex(bytes: &[u8]) -> String {
     format!("0x{}", hex::encode(bytes))
 }
 
+/// Encodes a Merkle root or txid Merkle root for a request.
+///
+/// The POI node stores these values and compares them as exact strings, and its
+/// canonical form is lowercase hex without a `0x` prefix. The wallet client
+/// sends the same unprefixed form. A `0x` prefix does not match and the node
+/// answers `false`.
+fn encode_root_hex(bytes: &[u8]) -> String {
+    hex::encode(bytes)
+}
+
 fn parse_root(value: &str) -> Result<MerkleRoot, PoiError> {
     let bytes = decode_fixed_hex::<32>(value, "POI merkleroot must be exactly 32 bytes of hex")?;
     MerkleRoot::from_slice(&bytes).map_err(|_| {
@@ -1179,9 +1189,9 @@ impl From<&TransactProofData> for TransactProofDataWire {
             poi_merkleroots: value
                 .poi_merkleroots()
                 .iter()
-                .map(|root| encode_bytes_hex(root.as_bytes()))
+                .map(|root| encode_root_hex(root.as_bytes()))
                 .collect(),
-            txid_merkleroot: encode_bytes_hex(value.txid_merkleroot().as_bytes()),
+            txid_merkleroot: encode_root_hex(value.txid_merkleroot().as_bytes()),
             txid_merkleroot_index: value.txid_merkleroot_index().get(),
             blinded_commitments_out: value
                 .blinded_commitments_out()
@@ -1419,7 +1429,7 @@ pub fn serialize_poi_json_rpc_request(payload: &PoiJsonRpcRequest) -> Result<Str
                 chain: params.chain_params().into(),
                 tree: params.tree(),
                 index: params.index(),
-                merkleroot: encode_bytes_hex(params.merkleroot().as_bytes()),
+                merkleroot: encode_root_hex(params.merkleroot().as_bytes()),
             },
             *id,
         ),
@@ -1431,7 +1441,7 @@ pub fn serialize_poi_json_rpc_request(payload: &PoiJsonRpcRequest) -> Result<Str
                 poi_merkleroots: params
                     .poi_merkleroots()
                     .iter()
-                    .map(|root| encode_bytes_hex(root.as_bytes()))
+                    .map(|root| encode_root_hex(root.as_bytes()))
                     .collect(),
             },
             *id,
@@ -1665,7 +1675,26 @@ mod tests {
 
         assert_eq!(
             payload,
-            r#"{"jsonrpc":"2.0","method":"ppoi_validate_txid_merkleroot","params":{"chainType":"0","chainID":"1","txidVersion":"V2_PoseidonMerkle","tree":3,"index":4,"merkleroot":"0x0505050505050505050505050505050505050505050505050505050505050505"},"id":9}"#
+            r#"{"jsonrpc":"2.0","method":"ppoi_validate_txid_merkleroot","params":{"chainType":"0","chainID":"1","txidVersion":"V2_PoseidonMerkle","tree":3,"index":4,"merkleroot":"0505050505050505050505050505050505050505050505050505050505050505"},"id":9}"#
+        );
+    }
+
+    #[test]
+    fn validate_poi_merkleroots_request_sends_unprefixed_roots() {
+        let params =
+            PoiValidatePoiMerklerootsParams::new(chain_params(), list_key(), vec![root(5)])
+                .unwrap_or_else(|error| panic!("poi merkleroots params should construct: {error}"));
+        let payload = serialize_poi_json_rpc_request(&PoiJsonRpcRequest::ValidatePoiMerkleroots {
+            id: 11,
+            params: Box::new(params),
+        })
+        .unwrap_or_else(|error| {
+            panic!("validate poi merkleroots request should serialize: {error}")
+        });
+
+        assert_eq!(
+            payload,
+            r#"{"jsonrpc":"2.0","method":"ppoi_validate_poi_merkleroots","params":{"chainType":"0","chainID":"1","txidVersion":"V2_PoseidonMerkle","listKey":"efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88","poiMerkleroots":["0505050505050505050505050505050505050505050505050505050505050505"]},"id":11}"#
         );
     }
 
@@ -1686,6 +1715,12 @@ mod tests {
             r#""listKey":"efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88""#
         ));
         assert!(payload.contains(r#""transactProofData":{"snarkProof""#));
+        assert!(payload.contains(
+            r#""poiMerkleroots":["0202020202020202020202020202020202020202020202020202020202020202","0303030303030303030303030303030303030303030303030303030303030303"]"#
+        ));
+        assert!(payload.contains(
+            r#""txidMerkleroot":"0404040404040404040404040404040404040404040404040404040404040404""#
+        ));
     }
 
     #[test]
