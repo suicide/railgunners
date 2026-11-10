@@ -131,9 +131,18 @@ The txid leaf Merkle proof vector in this repository continues to validate throu
 The current implementation intentionally keeps two different normalization regimes:
 
 - general Poseidon facade helpers use strict canonical field conversions where appropriate
-- txid-specific helpers apply broadcaster/engine-compatible modulo normalization before hashing
+- note-public-key and txid-specific helpers apply modulo normalization before hashing, where the protocol requires it
 
-This split keeps the general crypto surface strict while preserving exact txid interoperability.
+Note public key derivation reduces the receiver master public key modulo the BN254
+scalar field unconditionally. Addresses such as `0zk1q8`, `0zk1q9`, `0zk1qx`, and
+out-of-field `0zk1qy` encode integers above the field; a conforming sender hashes
+their residue, so the `m + 4P` alias of an in-field key `m` hashes exactly as `m`.
+The reduction lives at the note-hash boundary, not in address decode or the
+general facade, so address round-tripping and strict Merkle, nullifier, and
+commitment conversions are unchanged.
+
+This split keeps the general crypto surface strict while preserving exact note and
+txid interoperability.
 
 ## More Test Vectors
 

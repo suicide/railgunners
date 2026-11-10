@@ -187,8 +187,7 @@ pub(crate) fn hash_railgun_txid_leaf(
     .map(field_to_biguint)
 }
 
-#[allow(dead_code)]
-fn field_from_biguint_mod_order(value: &BigUint) -> Fr {
+pub(crate) fn field_from_biguint_mod_order(value: &BigUint) -> Fr {
     Fr::from_be_bytes_mod_order(&value.to_bytes_be())
 }
 

@@ -174,20 +174,23 @@ pub fn recover_sender(
 
 /// Derives a note public key from a receiver master public key and 16-byte note random.
 ///
-/// Poseidon input ordering is exactly `[receiver_master_public_key, random]`
-/// over the BN254 scalar field.
+/// Poseidon input ordering is exactly `[receiver_master_public_key mod P, random]`
+/// over the BN254 scalar field. Reduction is unconditional: an in-field key is
+/// unchanged, while an out-of-field 32-byte key decodes from addresses such as
+/// `0zk1q8`, `0zk1q9`, `0zk1qx`, and out-of-field `0zk1qy` and hashes as its
+/// residue. This matches every conforming RAILGUN sender, including the
+/// spendable `m + 4P` alias of an in-field master public key `m`.
 ///
 /// # Errors
 ///
-/// Returns an error if `receiver_master_public_key` is not a valid BN254 field
-/// element or if Poseidon hashing fails unexpectedly.
+/// Returns an error only if Poseidon hashing fails unexpectedly. An
+/// out-of-field `receiver_master_public_key` is reduced, not rejected.
 pub fn derive_note_public_key(
     receiver_master_public_key: &MasterPublicKey,
     random: &NoteRandom,
 ) -> Result<NotePublicKey, KeyDerivationError> {
     let inputs = [
-        poseidon::field_from_biguint(receiver_master_public_key.value())
-            .map_err(|_| KeyDerivationError::DerivationFailure)?,
+        poseidon::field_from_biguint_mod_order(receiver_master_public_key.value()),
         poseidon::field_from_bytes_mod_order(random.as_bytes()),
     ];
     let hash = poseidon::hash_fields(&inputs).map_err(|_| KeyDerivationError::DerivationFailure)?;
@@ -572,7 +575,7 @@ mod tests {
         NoteCommitment, NoteParty, NotePerspective, NotePublicKey, NoteRandom, NoteSpentState,
         NoteValue, Nullifier, NullifyingKey, ReconstructedNote, SenderRandom, SenderRecovery,
         SenderVisibility, SharedRandom, TokenHash, TrackedNoteNullifier, V2Plaintext, V3Plaintext,
-        ViewingPrivateKey, WalletNoteOwnership,
+        ViewingPrivateKey, WalletNoteOwnership, bn254_scalar_field_modulus,
     };
 
     use super::{
@@ -584,7 +587,7 @@ mod tests {
     };
     use crate::{
         build_wallet_scan_key_bundle, derive_note_blinding_keys, derive_nullifying_key_from_bytes,
-        derive_viewing_public_key, hd::KeyDerivationError,
+        derive_viewing_public_key,
     };
 
     fn decode_hex<const N: usize>(value: &str) -> [u8; N] {
@@ -611,6 +614,17 @@ mod tests {
                 .unwrap_or_else(|| panic!("master public key should parse")),
         )
         .unwrap_or_else(|error| panic!("master public key should validate: {error}"))
+    }
+
+    fn master_public_key_value(value: BigUint) -> MasterPublicKey {
+        MasterPublicKey::new(value)
+            .unwrap_or_else(|error| panic!("master public key should validate: {error}"))
+    }
+
+    fn scalar_alias(master_public_key: &MasterPublicKey, multiple: u8) -> MasterPublicKey {
+        master_public_key_value(
+            master_public_key.value() + &bn254_scalar_field_modulus() * BigUint::from(multiple),
+        )
     }
 
     fn note_party(master_public_key_decimal: &str, viewing_private_key_hex: &str) -> NoteParty {
@@ -1487,6 +1501,122 @@ mod tests {
     }
 
     #[test]
+    fn reconstructs_v2_sent_note_addressed_to_out_of_field_alias() {
+        let sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let receiver_alias = NoteParty::new(
+            scalar_alias(receiver.master_public_key(), 4),
+            *receiver.viewing_public_key(),
+        );
+        let random = NoteRandom::new(decode_hex("22222222222222222222222222222222"));
+        let sender_random = SenderRandom::new(decode_hex("86727859e3fe7c0d81e27dfafaf0d9"));
+        let token_hash = TokenHash::new(decode_hex(
+            "0000000000000000000000009fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        ));
+        let value = NoteValue::new(0x0003_635c_9adc_5dea_0000);
+        let encoded_master_public_key = encode_master_public_key(
+            receiver_alias.master_public_key(),
+            sender.master_public_key(),
+            Some(&sender_random),
+        )
+        .unwrap_or_else(|error| panic!("encoded master public key should derive: {error}"));
+        let plaintext = V2Plaintext::new(
+            encoded_master_public_key,
+            token_hash,
+            random,
+            value,
+            b"alias-v2".to_vec(),
+        );
+        let (blinded_sender_viewing_key, blinded_receiver_viewing_key) =
+            compute_blinded_keys(&sender, &receiver, &random, &sender_random);
+        let expected_commitment = derive_note_commitment(
+            &derive_note_public_key(receiver.master_public_key(), &random)
+                .unwrap_or_else(|error| panic!("note public key should derive: {error}")),
+            &token_hash,
+            value,
+        )
+        .unwrap_or_else(|error| panic!("commitment should derive: {error}"));
+
+        let reconstructed = reconstruct_v2_note(
+            &plaintext,
+            &sender,
+            &blinded_sender_viewing_key,
+            &blinded_receiver_viewing_key,
+            NotePerspective::Sent,
+            Some(sender_random),
+            &expected_commitment,
+        )
+        .unwrap_or_else(|error| panic!("alias sent reconstruction should succeed: {error}"));
+
+        assert_eq!(
+            reconstructed.note().receiver().master_public_key(),
+            receiver_alias.master_public_key()
+        );
+        assert_eq!(reconstructed.note().commitment(), &expected_commitment);
+    }
+
+    #[test]
+    fn reconstructs_v2_received_note_for_alias_scan_bundle() {
+        let sender = note_party(
+            "123456789",
+            "67d7d19d00e6e3b3517fe68ac46505dd207df6e8fe3aa06ba3face352e7599ef",
+        );
+        let receiver = note_party(
+            "20060431504059690749153982049210720252589378133547582826474262520121417617087",
+            "3428cfc939320328501174a4e76e869197ffc894b58dbf4d0e953c484d66cb5e",
+        );
+        let receiver_alias = NoteParty::new(
+            scalar_alias(receiver.master_public_key(), 4),
+            *receiver.viewing_public_key(),
+        );
+        let random = NoteRandom::new(decode_hex("85b08a7cd73ee433072f1d410aeb4801"));
+        let sender_random = SenderRandom::null_sentinel();
+        let token_hash = TokenHash::new(decode_hex(
+            "0000000000000000000000007f4925cdf66ddf5b88016df1fe915e68eff8f192",
+        ));
+        let value = NoteValue::new(0x086a_a1ad_e61c_cb53);
+        let plaintext = V2Plaintext::new(
+            receiver.master_public_key().clone(),
+            token_hash,
+            random,
+            value,
+            b"alias-received-v2".to_vec(),
+        );
+        let (blinded_sender_viewing_key, blinded_receiver_viewing_key) =
+            compute_blinded_keys(&sender, &receiver, &random, &sender_random);
+        let expected_commitment = derive_note_commitment(
+            &derive_note_public_key(receiver.master_public_key(), &random)
+                .unwrap_or_else(|error| panic!("note public key should derive: {error}")),
+            &token_hash,
+            value,
+        )
+        .unwrap_or_else(|error| panic!("commitment should derive: {error}"));
+
+        let reconstructed = reconstruct_v2_note(
+            &plaintext,
+            &receiver_alias,
+            &blinded_sender_viewing_key,
+            &blinded_receiver_viewing_key,
+            NotePerspective::Received,
+            None,
+            &expected_commitment,
+        )
+        .unwrap_or_else(|error| panic!("alias received reconstruction should succeed: {error}"));
+
+        assert_eq!(
+            reconstructed.note().receiver().master_public_key(),
+            receiver_alias.master_public_key()
+        );
+        assert_eq!(reconstructed.note().commitment(), &expected_commitment);
+    }
+
+    #[test]
     fn v2_sent_note_requires_sender_random() {
         let sender = note_party(
             "123456789",
@@ -1694,19 +1824,73 @@ mod tests {
     }
 
     #[test]
-    fn rejects_master_public_key_outside_bn254_scalar_field() {
-        let invalid_master_public_key = MasterPublicKey::new(BigUint::from_bytes_be(&[
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-            0xff, 0xff, 0xff, 0xff,
-        ]))
-        .unwrap_or_else(|error| panic!("master public key should fit 32 bytes: {error}"));
-        let random = NoteRandom::new([0_u8; NoteRandom::LENGTH]);
+    fn reduces_master_public_key_modulo_bn254_scalar_field() {
+        // Published alias vectors: random is the integer 0x0123456789abcdef.
+        let random = NoteRandom::new([
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+            0xcd, 0xef,
+        ]);
+        let modulus = bn254_scalar_field_modulus();
+        let max_in_field = &modulus - BigUint::from(1_u8);
 
-        let Err(error) = derive_note_public_key(&invalid_master_public_key, &random) else {
-            panic!("invalid master public key should fail");
-        };
+        let zero_note_public_key =
+            derive_note_public_key(&master_public_key_value(BigUint::from(0_u8)), &random)
+                .unwrap_or_else(|error| panic!("zero derivation should succeed: {error}"));
+        let modulus_note_public_key =
+            derive_note_public_key(&master_public_key_value(modulus.clone()), &random)
+                .unwrap_or_else(|error| panic!("modulus derivation should succeed: {error}"));
+        let alias_note_public_key = derive_note_public_key(
+            &master_public_key_value(&modulus * BigUint::from(4_u8)),
+            &random,
+        )
+        .unwrap_or_else(|error| panic!("alias derivation should succeed: {error}"));
 
-        assert_eq!(error, KeyDerivationError::DerivationFailure);
+        assert_eq!(zero_note_public_key, modulus_note_public_key);
+        assert_eq!(zero_note_public_key, alias_note_public_key);
+        assert_eq!(
+            zero_note_public_key.value(),
+            &BigUint::parse_bytes(
+                b"19056470063087902131593146184572473945767236416742895250299217251461030112596",
+                10,
+            )
+            .unwrap_or_else(|| panic!("expected note public key should parse"))
+        );
+
+        let max_in_field_note_public_key =
+            derive_note_public_key(&master_public_key_value(max_in_field.clone()), &random)
+                .unwrap_or_else(|error| panic!("max in-field derivation should succeed: {error}"));
+        let max_alias_note_public_key = derive_note_public_key(
+            &master_public_key_value(&max_in_field + &modulus * BigUint::from(4_u8)),
+            &random,
+        )
+        .unwrap_or_else(|error| panic!("max alias derivation should succeed: {error}"));
+
+        assert_eq!(max_in_field_note_public_key, max_alias_note_public_key);
+        assert_eq!(
+            max_in_field_note_public_key.value(),
+            &BigUint::parse_bytes(
+                b"7100881049663300103562882746394069111498640081008211910827032425647376082684",
+                10,
+            )
+            .unwrap_or_else(|| panic!("expected note public key should parse"))
+        );
+    }
+
+    #[test]
+    fn hashes_out_of_field_address_master_public_key_as_reduced_residue() {
+        let out_of_field = master_public_key_value(BigUint::from_bytes_be(&decode_hex::<32>(
+            "ee6b4c702f8070c8ddea1cbb8b0f6a4a518b77fa8d3f9b68617b664550e75f64",
+        )));
+        let reduced = master_public_key_value(BigUint::from_bytes_be(&decode_hex::<32>(
+            "2cda12a4aab9f021fca905e1850a08d5b0bbd6d8a659d92351f38ff590e75f60",
+        )));
+        let random = NoteRandom::new(decode_hex("85b08a7cd73ee433072f1d410aeb4801"));
+
+        assert_eq!(
+            derive_note_public_key(&out_of_field, &random)
+                .unwrap_or_else(|error| panic!("out-of-field derivation should succeed: {error}")),
+            derive_note_public_key(&reduced, &random)
+                .unwrap_or_else(|error| panic!("reduced derivation should succeed: {error}"))
+        );
     }
 }
